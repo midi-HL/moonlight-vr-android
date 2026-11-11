@@ -6,8 +6,10 @@
       :framegen 库需要 minSdk 29（AHardwareBuffer Vulkan import）。:app minSdk=22。
       强制覆盖：framegen 功能本身在 SDK<29 上会通过 FramegenInterceptor.isAvailable()
       返回 false 自动禁用，因此低版本设备不会触达 framegen 代码。
+      Cardboard SDK AAR 声明 minSdk=24；VR 入口在 VrSession 里对 SDK<24 直接禁用，
+      低版本设备仍可正常使用原有 2D 串流功能。
     -->
-    <uses-sdk tools:overrideLibrary="com.limelight.framegen,rikka.shizuku.api,rikka.shizuku.provider,rikka.shizuku.shared,rikka.shizuku.aidl" />
+    <uses-sdk tools:overrideLibrary="com.limelight.framegen,rikka.shizuku.api,rikka.shizuku.provider,rikka.shizuku.shared,rikka.shizuku.aidl,com.google.cardboard.sdk" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

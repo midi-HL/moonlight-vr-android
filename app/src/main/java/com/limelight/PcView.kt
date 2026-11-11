@@ -193,6 +193,7 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
 
     // Constants
     companion object {
+        private const val VR_BUTTON_TAG = "vr_entry_button"
         private const val REFRESH_DEBOUNCE_DELAY = 150L
         private const val STARTUP_UPDATE_CHECK_DELAY = 5000L
         private const val STARTUP_DIALOG_GAP_DELAY = 250L
@@ -663,6 +664,42 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         aboutButton?.setOnClickListener { AboutDialogLauncher.show(this) }
         easyTierButton?.setOnClickListener { showEasyTierControlDialog() }
         toolbarMenuButton?.setOnClickListener { showPcToolbarMenu(it) }
+        installVrEntryButton()
+    }
+
+    /**
+     * VR is available from the home page itself: no need to start a stream first.
+     * The button is created in code so the existing toolbar XML stays untouched.
+     */
+    private fun installVrEntryButton() {
+        val anchor = findViewById<View>(R.id.settingsButton) ?: return
+        val parent = anchor.parent as? android.view.ViewGroup ?: return
+        if (parent.findViewWithTag<View>(VR_BUTTON_TAG) != null) return
+        val button = android.widget.Button(this).apply {
+            tag = VR_BUTTON_TAG
+            text = "VR"
+            isAllCaps = false
+            textSize = 12f
+            setTextColor(android.graphics.Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.argb(210, 30, 110, 180))
+                cornerRadius = dpToPx(12).toFloat()
+            }
+            layoutParams = when (parent) {
+                is android.widget.LinearLayout -> android.widget.LinearLayout.LayoutParams(
+                    dpToPx(46), dpToPx(34),
+                ).apply { setMargins(dpToPx(6), 0, 0, 0) }
+                else -> android.widget.FrameLayout.LayoutParams(
+                    dpToPx(46), dpToPx(34),
+                )
+            }
+            setOnClickListener {
+                com.limelight.vr.VrSession.setEnabled(this@PcView, true)
+            }
+            isFocusable = true
+        }
+        val index = parent.indexOfChild(anchor)
+        parent.addView(button, index + 1)
     }
 
     private fun showPcToolbarMenu(anchor: View) {

@@ -514,6 +514,35 @@ class MediaCodecDecoderRenderer(
         pyrowaveDecoder.setSurface(renderTarget?.surface)
     }
 
+    /**
+     * VR whole-window projection: the stream SurfaceView is composited by
+     * SurfaceFlinger, not by decor.draw(), so it never appears in the captured
+     * window Bitmap. Registering a SurfaceTexture-backed Surface here lets the
+     * GL renderer sample the decoded frames directly. Passing null switches
+     * back to the original SurfaceHolder — the codec keeps running, no stream
+     * reconnection and no decoder recreation.
+     *
+     * Framegen/HDR paths are left untouched: when framegen owns the output the
+     * switch is skipped and the decor projection still shows all 2D overlays.
+     */
+    @Volatile private var vrOutputSurface: Surface? = null
+
+    fun setVrOutputSurface(surface: Surface?) {
+        if (vrOutputSurface === surface) return
+        vrOutputSurface = surface
+        val decoder = videoDecoder ?: return
+        if (framegenOutputSwitchPending || framegenSurface != null) return
+        val target = surface ?: renderTarget?.surface ?: return
+        try {
+            if (target.isValid) {
+                decoder.setOutputSurface(target)
+                LimeLog.info("VR output surface switched: ${if (surface == null) "2D" else "VR"}")
+            }
+        } catch (t: Throwable) {
+            LimeLog.warning("VR output surface switch failed: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
     private fun destroyPyrowaveDecoder() {
         pyrowaveDecoder.destroy()
     }
@@ -1125,7 +1154,8 @@ class MediaCodecDecoderRenderer(
         // stream stop). Fail with the exception type every configureAndStartDecoder caller
         // already treats as an invalid surface instead of crashing on a null dereference.
         fun directOutputSurface(): Surface =
-            renderTarget?.surface
+            vrOutputSurface?.takeIf { it.isValid }
+                ?: renderTarget?.surface
                 ?: throw IllegalArgumentException("Render target was released before decoder configuration")
         val outSurface = if (framegenOutputSwitchPending) {
             LimeLog.info(

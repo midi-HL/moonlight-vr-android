@@ -29,6 +29,7 @@ class LimelightApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppTheme.applyStoredAppTheme(this)
+        com.limelight.vr.VrSession.install(this)
         initializeFirebaseSafely()
         CrashReporter.install(this)
         ConfigurationSyncScheduler.runNow(this)

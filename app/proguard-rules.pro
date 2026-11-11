@@ -4,6 +4,14 @@
 # Our code
 -keep class com.limelight.binding.input.evdev.* {*;}
 
+# Google Cardboard SDK JNI surface: obfuscating a class/method name lets
+# System.loadLibrary succeed but makes every subsequent JNI call fail on device.
+-keep class com.google.cardboard.sdk.** { *; }
+-keep class com.google.cardboard.proto.** { *; }
+# VR preference keys are persisted by name; keep the whole VR package so R8
+# cannot rename enum constants or the JNI/GL glue.
+-keep class com.limelight.vr.** { *; }
+
 # Moonlight common
 -keep class com.limelight.nvstream.jni.* {*;}
 

@@ -1358,4 +1358,114 @@
         <com.limelight.preferences.SponsorPreference
             android:key="sponsor_panel" />
     </PreferenceCategory>
+
+    <!-- VR 整窗投影：所有 2D 界面（含主页面）都能在头显里运行并用手柄操作。
+         长按 START+SELECT 或 MODE 可在串流过程中直接唤出同一份设置的快捷面板。 -->
+    <PreferenceCategory android:title="@string/category_vr"
+        android:key="category_vr"
+        android:order="15"
+        android:layout="@layout/preference_category_material">
+        <CheckBoxPreference
+            android:key="vr_enabled"
+            android:title="@string/title_vr_enabled"
+            android:summary="@string/summary_vr_enabled"
+            android:defaultValue="false" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_screen_scale"
+            android:title="@string/title_vr_scale"
+            android:summary="@string/summary_vr_scale"
+            android:defaultValue="1000"
+            seekbar:min="500"
+            android:max="2200"
+            seekbar:step="50"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_screen_distance"
+            android:title="@string/title_vr_distance"
+            android:summary="@string/summary_vr_distance"
+            android:defaultValue="2200"
+            seekbar:min="800"
+            android:max="5000"
+            seekbar:step="100"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="m" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_brightness"
+            android:title="@string/title_vr_brightness"
+            android:summary="@string/summary_vr_brightness"
+            android:defaultValue="1000"
+            seekbar:min="300"
+            android:max="1000"
+            seekbar:step="50"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_curvature"
+            android:title="@string/title_vr_curvature"
+            android:summary="@string/summary_vr_curvature"
+            android:defaultValue="0"
+            seekbar:min="0"
+            android:max="1000"
+            seekbar:step="50"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <CheckBoxPreference
+            android:key="vr_head_tracking"
+            android:title="@string/title_vr_head_tracking"
+            android:summary="@string/summary_vr_head_tracking"
+            android:defaultValue="true" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_head_sensitivity"
+            android:title="@string/title_vr_head_sensitivity"
+            android:summary="@string/summary_vr_head_sensitivity"
+            android:defaultValue="1000"
+            seekbar:min="250"
+            android:max="2000"
+            seekbar:step="50"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_ipd_scale"
+            android:title="@string/title_vr_ipd"
+            android:summary="@string/summary_vr_ipd"
+            android:defaultValue="1000"
+            seekbar:min="500"
+            android:max="1600"
+            seekbar:step="20"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_gamepad_dead_zone"
+            android:title="@string/title_vr_dead_zone"
+            android:summary="@string/summary_vr_dead_zone"
+            android:defaultValue="180"
+            seekbar:min="50"
+            android:max="500"
+            seekbar:step="10"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_menu_repeat_ms"
+            android:title="@string/title_vr_repeat"
+            android:summary="@string/summary_vr_repeat"
+            android:defaultValue="140"
+            seekbar:min="60"
+            android:max="400"
+            seekbar:step="20"
+            seekbar:keyStep="1"
+            android:text="ms" />
+        <CheckBoxPreference
+            android:key="vr_recenter_on_enter"
+            android:title="@string/title_vr_recenter_on_enter"
+            android:summary="@string/summary_vr_recenter_on_enter"
+            android:defaultValue="true" />
+    </PreferenceCategory>
 </PreferenceScreen>

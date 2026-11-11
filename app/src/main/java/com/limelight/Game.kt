@@ -1086,6 +1086,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             )
             rendererForFailure = newRenderer
             decoderRenderer = newRenderer
+            com.limelight.vr.VrVideoSurfaceRegistry.attachDecoder(newRenderer)
             // 首帧解码到达时立刻隐藏 loading overlay，无缝切到真实画面
             decoderRenderer?.firstFrameCallback = {
                 val outputSize = newRenderer.decodedOutputSize()
@@ -1422,6 +1423,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             try {
                 decoderRenderer?.prepareForStop()
             } catch (_: Exception) {}
+            com.limelight.vr.VrVideoSurfaceRegistry.detachDecoder(decoderRenderer!!)
             decoderRenderer = null
         }
 

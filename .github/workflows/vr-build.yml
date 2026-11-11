@@ -1,0 +1,194 @@
+name: vr-build
+
+# 强制要求：所有编译都在 GitHub Actions 上完成。本地不做任何 Gradle 构建。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master, 'vr/**' ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vr-apk:
+    name: VR 整窗投影 - 单测 + Debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      AUDIO_HAPTICS_SDK_REF: b3f97c3bb7500ea7b1985aea568e5c7b40308d3b
+      AUDIO_HAPTICS_SDK_DIR: ${{ github.workspace }}/.deps/moonlight-audio-haptics
+      GITHUB_OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || secrets.OAUTH_CLIENT_ID || '' }}
+
+    steps:
+      - name: Checkout（含子模块）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Checkout audio haptics SDK
+        uses: actions/checkout@v4
+        with:
+          repository: AlkaidLab/moonlight-audio-haptics
+          ref: ${{ env.AUDIO_HAPTICS_SDK_REF }}
+          path: .deps/moonlight-audio-haptics
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK / NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358 cmake;3.22.1
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Remove local.properties
+        run: rm -f local.properties
+
+      - name: Warm Gradle distribution (retry transient download timeouts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          for attempt in 1 2 3 4 5; do
+            if ./gradlew --version; then exit 0; fi
+            echo "Gradle warm-up attempt ${attempt} failed" >&2
+            sleep 10
+          done
+          echo "FAIL: Gradle distribution could not be downloaded" >&2
+          exit 1
+
+      # CI 是唯一验证入口：静态守卫检查整窗投影的关键接线是否存在。
+      - name: VR wiring static guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sys
+          root = pathlib.Path('.')
+          checks = [
+              ('app/libs/cardboard-sdk.aar', 'Cardboard SDK AAR is vendored'),
+              ('app/src/main/java/com/limelight/vr/VrSession.kt', 'VrSession global overlay exists'),
+              ('app/src/main/java/com/limelight/vr/VrWindowCapture.kt', 'whole-window capture exists'),
+              ('app/src/main/java/com/limelight/vr/VrTheaterRenderer.kt', 'stereo renderer exists'),
+              ('app/src/main/java/com/limelight/vr/VrQuickPanel.kt', 'in-VR quick settings panel exists'),
+          ]
+          for path, label in checks:
+              if not (root / path).is_file():
+                  sys.exit('FAIL: missing %s (%s)' % (path, label))
+          gradle = (root / 'app/build.gradle').read_text(encoding='utf-8')
+          if 'libs/cardboard-sdk.aar' not in gradle:
+              sys.exit('FAIL: Cardboard AAR not wired in app/build.gradle')
+          manifest = (root / 'app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
+          if 'com.google.cardboard.sdk' not in manifest:
+              sys.exit('FAIL: Cardboard minSdk override missing from Manifest')
+          app = (root / 'app/src/main/java/com/limelight/LimelightApplication.kt').read_text(encoding='utf-8')
+          if 'VrSession.install' not in app:
+              sys.exit('FAIL: VrSession not installed in Application')
+          prefs = (root / 'app/src/main/res/xml/preferences.xml').read_text(encoding='utf-8')
+          if 'category_vr' not in prefs or 'vr_enabled' not in prefs:
+              sys.exit('FAIL: VR settings category missing from PreferenceScreen')
+          print('VR wiring guards passed')
+          PY
+
+      - name: Verify Cardboard JNI libs are in the vendored AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile('app/libs/cardboard-sdk.aar') as z:
+              libs = {n for n in z.namelist() if n.startswith('jni/') and n.endswith('.so')}
+          print('AAR jni libs:', sorted(libs))
+          for lib in ('jni/arm64-v8a/libcardboard_sdk_jni.so',
+                      'jni/arm64-v8a/libGfxPluginCardboard.so'):
+              if lib not in libs:
+                  sys.exit('FAIL: %s missing from AAR - VR entry would crash' % lib)
+          PY
+
+      - name: Run VR JVM unit tests
+        run: ./gradlew --no-daemon --stacktrace :app:testNonRootDebugUnitTest --tests 'com.limelight.vr.*'
+
+      - name: Assert VR JVM tests actually ran
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          files = sorted(glob.glob('app/build/test-results/testNonRootDebugUnitTest/TEST-*Vr*.xml'))
+          suites = tests = failures = errors = 0
+          for path in files:
+              for suite in ET.parse(path).getroot().iter('testsuite'):
+                  suites += 1
+                  tests += int(suite.get('tests', 0))
+                  failures += int(suite.get('failures', 0))
+                  errors += int(suite.get('errors', 0))
+              print(' ', path)
+          print('VR suites=%d tests=%d failures=%d errors=%d' % (suites, tests, failures, errors))
+          if not files or suites == 0 or tests == 0:
+              sys.exit('FAIL: no VR JVM tests executed')
+          if failures or errors:
+              sys.exit('FAIL: VR JVM tests reported failures')
+          PY
+
+      - name: Build NonRoot Debug APK
+        run: ./gradlew --no-daemon --stacktrace :app:assembleNonRootDebug
+
+      - name: Verify VR code and Cardboard JNI are inside the APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/nonRoot/debug -maxdepth 1 -name '*.apk' -type f -print -quit)
+          test -n "$APK" || { echo 'FAIL: no debug APK produced' >&2; exit 1; }
+          python3 - "$APK" <<'PY'
+          import sys, zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as z:
+              names = set(z.namelist())
+              libs = sorted(n for n in names if n.startswith('lib/') and n.endswith('.so'))
+          print('APK:', path)
+          for lib in ('lib/arm64-v8a/libcardboard_sdk_jni.so',
+                      'lib/arm64-v8a/libGfxPluginCardboard.so'):
+              if lib not in names:
+                  sys.exit('FAIL: %s missing from APK' % lib)
+          # Kotlin classes live in classes*.dex; check the dex actually contains our VR package.
+          with zipfile.ZipFile(path) as z:
+              dex = b''.join(
+                  z.read(n) for n in z.namelist()
+                  if n.startswith('classes') and n.endswith('.dex')
+              )
+          if b'Lcom/limelight/vr/VrSession' not in dex:
+              sys.exit('FAIL: VrSession missing from APK dex')
+          print('VR JNI + VR dex verified')
+          PY
+
+      - name: Upload VR APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonlight-vr-nonroot-debug
+          path: app/build/outputs/apk/nonRoot/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload VR unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vr-unit-test-report
+          path: |
+            app/build/reports/tests/testNonRootDebugUnitTest/
+            app/build/test-results/testNonRootDebugUnitTest/
+          if-no-files-found: ignore

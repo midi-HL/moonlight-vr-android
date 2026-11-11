@@ -2539,4 +2539,29 @@ Tap again to replace it.</string>
     <string name="host_unlock_still_locked_message">The PIN may be wrong, or the lock screen is not asking for a PIN. Set up the PIN again?</string>
     <string name="host_unlock_reset_pin">Set up again</string>
     <string name="host_unlock_close">Close</string>
+
+    <!-- VR whole-window projection -->
+    <string name="category_vr">VR 视图（全界面）</string>
+    <string name="title_vr_enabled">启用 VR 视图</string>
+    <string name="summary_vr_enabled">主页面、设置页、弹窗和串流画面全部投影到双目 VR 空间；也可用手柄 L1+R1 随时进入</string>
+    <string name="title_vr_scale">幕布大小</string>
+    <string name="summary_vr_scale">调整 VR 空间中整块 2D 窗口的视觉尺寸</string>
+    <string name="title_vr_distance">幕布距离</string>
+    <string name="summary_vr_distance">窗口离眼睛的距离，越远越不容易晕</string>
+    <string name="title_vr_brightness">画面亮度</string>
+    <string name="summary_vr_brightness">VR 幕布亮度</string>
+    <string name="title_vr_curvature">幕布弧度</string>
+    <string name="summary_vr_curvature">把平面窗口弯成影院弧面</string>
+    <string name="title_vr_head_tracking">头部追踪</string>
+    <string name="summary_vr_head_tracking">转头时窗口固定在空间中；关闭后窗口跟随头部</string>
+    <string name="title_vr_head_sensitivity">追踪灵敏度</string>
+    <string name="summary_vr_head_sensitivity">头部转动的响应比例</string>
+    <string name="title_vr_ipd">等效瞳距</string>
+    <string name="summary_vr_ipd">左右眼视差微调，1.00x 为设备原始值</string>
+    <string name="title_vr_dead_zone">手柄死区</string>
+    <string name="summary_vr_dead_zone">摇杆触发菜单导航/调值的最小偏移量</string>
+    <string name="title_vr_repeat">按键重复间隔</string>
+    <string name="summary_vr_repeat">在 VR 内按住摇杆连续调值的速度</string>
+    <string name="title_vr_recenter_on_enter">进入时重置中心</string>
+    <string name="summary_vr_recenter_on_enter">进入 VR 时把当前朝向记为正前方</string>
 </resources>
