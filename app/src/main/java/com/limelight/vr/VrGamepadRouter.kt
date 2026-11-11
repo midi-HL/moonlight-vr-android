@@ -103,7 +103,9 @@ class VrGamepadRouter {
 
     fun onAxis(x: Float, y: Float, timeMs: Long): Command {
         if (!panelOpen) return Command.PassThrough
-        if (timeMs - lastAxisMs < repeatMs) return Command.Consumed
+        // eventTime is uptimeMillis and may be small on a freshly booted device;
+        // Long.MIN_VALUE sentinel must not overflow when subtracted.
+        if (lastAxisMs != Long.MIN_VALUE && timeMs - lastAxisMs < repeatMs) return Command.Consumed
         if (abs(y) > deadZone && abs(y) >= abs(x)) {
             lastAxisMs = timeMs
             if (editing) return Command.Adjust(if (y < 0) -1 else 1)

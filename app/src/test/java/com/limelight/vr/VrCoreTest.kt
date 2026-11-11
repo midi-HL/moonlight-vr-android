@@ -58,6 +58,14 @@ class VrCoreTest {
     }
 
     @Test
+    fun firstAxisEventIsNotSwallowedBySentinelOverflow() {
+        val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true; editing = true }
+        assertTrue(router.onAxis(0.9f, 0f, 1000L) is VrGamepadRouter.Command.Adjust)
+        assertTrue(router.onAxis(0.9f, 0f, 1050L) is VrGamepadRouter.Command.Consumed)
+        assertTrue(router.onAxis(0.9f, 0f, 1200L) is VrGamepadRouter.Command.Adjust)
+    }
+
+    @Test
     fun hatAxisMovesSelectionOncePerEdge() {
         val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
         assertTrue(router.onHat(1f) is VrGamepadRouter.Command.Move)
