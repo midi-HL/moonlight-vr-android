@@ -30,7 +30,6 @@ class VrTheaterView(context: Context, decor: View) : CardboardView(context) {
         setKeepScreenOn(true)
         setStereoRenderMode(true)
         hideTouchOverlay()
-        capture.start()
         addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 removeOnAttachStateChangeListener(this)

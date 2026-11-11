@@ -93,14 +93,4 @@ object VrScreenGeometry {
         }
         return Mesh(positions, texCoords, vertexCount)
     }
-
-    fun build(settings: VrSettings, aspect: Float = DEFAULT_ASPECT, segments: Int = DEFAULT_SEGMENTS): Mesh =
-        build(
-            scale = settings.screenScale,
-            distance = settings.screenDistanceMeters,
-            verticalOffset = settings.screenVerticalOffset,
-            curvature = settings.curvature,
-            aspect = aspect,
-            segments = segments,
-        )
 }

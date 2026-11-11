@@ -169,7 +169,9 @@ class StreamSettings : ThemedAppCompatActivity() {
             if (!isDestroyed && !isFinishing) loadBackgroundImage()
         }
         // VR 设置项与 VR 快捷面板共用同一份 SharedPreferences，2D 页面改动立即生效
-        com.limelight.vr.VrSettingsStore.onPreferenceChanged(this@StreamSettings, key)
+        if (key != null) {
+            com.limelight.vr.VrSettingsStore.onPreferenceChanged(this@StreamSettings, key)
+        }
     }
     private var externalDisplayManager: ExternalDisplayManager? = null
 

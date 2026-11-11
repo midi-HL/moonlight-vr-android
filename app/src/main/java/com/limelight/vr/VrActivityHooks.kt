@@ -34,6 +34,12 @@ class VrActivityHooks(private val activity: Activity, private val delegate: Wind
     override fun dispatchTouchEvent(event: MotionEvent): Boolean =
         delegate.dispatchTouchEvent(event)
 
+    override fun dispatchTrackballEvent(event: MotionEvent): Boolean =
+        delegate.dispatchTrackballEvent(event)
+
+    override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
+        delegate.dispatchKeyShortcutEvent(event)
+
     override fun dispatchPopulateAccessibilityEvent(event: AccessibilityEvent): Boolean =
         delegate.dispatchPopulateAccessibilityEvent(event)
 
