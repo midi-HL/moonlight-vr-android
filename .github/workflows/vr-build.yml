@@ -100,7 +100,24 @@ jobs:
           prefs = (root / 'app/src/main/res/xml/preferences.xml').read_text(encoding='utf-8')
           if 'category_vr' not in prefs or 'vr_enabled' not in prefs:
               sys.exit('FAIL: VR settings category missing from PreferenceScreen')
-          print('VR wiring guards passed')
+          # Every VR key persisted by VrSettingsStore must have a matching
+          # PreferenceScreen entry; otherwise the 2D page cannot edit it.
+          store = (root / 'app/src/main/java/com/limelight/vr/VrSettingsStore.kt').read_text(encoding='utf-8')
+          import re
+          keys = set(re.findall(r'const val K_\w+ = "(vr_\w+)"', store))
+          xml_keys = set(re.findall(r'android:key="(vr_\w+)"', prefs))
+          missing = keys - xml_keys
+          if missing:
+              sys.exit('FAIL: VR preference keys without UI entry: %s' % sorted(missing))
+          # Float settings are milli-units; every SeekBar entry needs divisor=1000.
+          for key in ('vr_screen_scale', 'vr_screen_distance', 'vr_brightness',
+                      'vr_curvature', 'vr_head_sensitivity', 'vr_ipd_scale',
+                      'vr_gamepad_dead_zone'):
+              block = re.search(r'<com\.limelight\.preferences\.SeekBarPreference\s[^>]*android:key="%s"[^>]*/>' % key,
+                                prefs, re.S)
+              if not block or 'seekbar:divisor="1000"' not in block.group(0):
+                  sys.exit('FAIL: %s is missing the milli-unit divisor' % key)
+          print('VR wiring guards passed (%d keys reconciled)' % len(keys))
           PY
 
       - name: Verify Cardboard JNI libs are in the vendored AAR
@@ -176,7 +193,7 @@ jobs:
           PY
 
       - name: Upload VR APK
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: moonlight-vr-nonroot-debug

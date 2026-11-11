@@ -77,9 +77,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     fun updateSettings(context: Context, value: VrSettings) {
         val clean = value.sanitized()
+        val wasEnabled = enabled
         VrSettingsStore.save(context, clean)
         settings = clean
         enabled = clean.enabled
+        if (wasEnabled && !enabled) restoreAllWindows()
         router.vrEnabled = enabled
         router.deadZone = clean.gamepadDeadZone
         router.repeatMs = clean.menuRepeatMs
@@ -129,6 +131,30 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val isGamepad = VrGamepadRouter.isGamepad(source)
         val command = router.onKey(event.keyCode, event.action, isGamepad)
         return handle(command)
+    }
+
+    fun onUiNavigation(x: Float, y: Float, hatY: Float, timeMs: Long): Boolean =
+        router.onUiNavigation(x, y, hatY, timeMs)
+
+    fun drainNavDirection(): Int = router.drainNavDirection()
+
+    /**
+     * Dialogs own a separate Window, so decor.draw() on the Activity cannot see
+     * them. Screens that open a Dialog register its decor here; the capture then
+     * draws it on top of the Activity decor. Weakly referenced and cleared when
+     * the Dialog is dismissed (detected by isShowing / attached state).
+     */
+    private val dialogDecors = java.util.concurrent.CopyOnWriteArrayList<java.lang.ref.WeakReference<View>>()
+
+    fun registerDialogDecor(decor: View?) {
+        if (decor == null) return
+        dialogDecors.removeAll { it.get() == null || it.get() === decor }
+        dialogDecors.add(java.lang.ref.WeakReference(decor))
+        onWindowDirty?.invoke()
+    }
+
+    fun activeDialogDecors(): List<View> = dialogDecors.mapNotNull { ref ->
+        ref.get()?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
     }
 
     /** Returns true when the motion event was consumed by the VR layer. */
@@ -247,10 +273,6 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val host = VrOverlayHost(activity, decor)
         hosts[activity] = host
         host.onStateChanged()
-        if (activeActivity == null) {
-            activeActivity = activity
-            bindActiveCallbacks()
-        }
         Log.i(TAG, "attach overlay: ${activity.javaClass.simpleName}")
     }
 
@@ -262,9 +284,13 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityPaused(activity: Activity) {
+        // Do NOT guess the next Activity here: during a transition the guessed
+        // host may still be paused/background. onActivityResumed binds the real
+        // top-resumed Activity; meanwhile keep no stale GL callbacks.
         if (activeActivity === activity) {
-            activeActivity = hosts.keys.lastOrNull { it !== activity && !it.isFinishing }
-            bindActiveCallbacks()
+            activeActivity = null
+            onRecenter = null
+            onWindowDirty = null
         }
     }
 
@@ -281,17 +307,35 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityDestroyed(activity: Activity) {
         hosts.remove(activity)?.release()
+        windowStates.remove(activity)
         if (activeActivity === activity) {
-            activeActivity = hosts.keys.lastOrNull { !it.isFinishing }
-            bindActiveCallbacks()
+            activeActivity = null
+            onRecenter = null
+            onWindowDirty = null
         }
         if (hosts.isEmpty()) cancelHold()
     }
 
+    /** Original per-Activity window state, restored verbatim when VR is turned off. */
+    private data class WindowState(val uiVisibility: Int, val keepScreenOn: Boolean)
+    private val windowStates = HashMap<Activity, WindowState>()
+
     private fun applyImmersive(activity: Activity) {
-        if (!enabled) return
+        if (!enabled) {
+            restoreWindow(activity)
+            return
+        }
+        val window = activity.window
         @Suppress("DEPRECATION")
-        activity.window.decorView.systemUiVisibility = (
+        windowStates.getOrPut(activity) {
+            WindowState(
+                uiVisibility = window.decorView.systemUiVisibility,
+                keepScreenOn = window.attributes.flags and
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
+            )
+        }
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
@@ -299,6 +343,20 @@ object VrSession : Application.ActivityLifecycleCallbacks {
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
             )
-        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun restoreWindow(activity: Activity) {
+        val state = windowStates.remove(activity) ?: return
+        @Suppress("DEPRECATION")
+        activity.window.decorView.systemUiVisibility = state.uiVisibility
+        if (!state.keepScreenOn) {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** Called from updateSettings when the VR flag transitions to off. */
+    private fun restoreAllWindows() {
+        windowStates.keys.toList().forEach(::restoreWindow)
     }
 }

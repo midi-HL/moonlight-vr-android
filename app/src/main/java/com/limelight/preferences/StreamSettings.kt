@@ -1250,6 +1250,7 @@ class StreamSettings : ThemedAppCompatActivity() {
             override fun onFragmentStarted(fm: FragmentManager, fragment: Fragment) {
                 if (fragment.tag !in PREFERENCE_DIALOG_TAGS) return
                 val dialog = (fragment as? DialogFragment)?.dialog ?: return
+                com.limelight.vr.VrSession.registerDialogDecor(dialog.window?.decorView)
                 dialog.setOnKeyListener { _, keyCode, event ->
                     if (event.action == KeyEvent.ACTION_DOWN) {
                         dialogHardwareInput = true
@@ -1335,6 +1336,7 @@ class StreamSettings : ThemedAppCompatActivity() {
             hideKeyboardBeforeDialog()
             dialog.show()
             AppDialogStyler.apply(dialog, requireContext())
+            com.limelight.vr.VrSession.registerDialogDecor(dialog.window?.decorView)
             return dialog
         }
 

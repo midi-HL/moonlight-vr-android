@@ -22,6 +22,12 @@ class VrGamepadRouter {
     private var menuArmed = false
     private var lastAxisMs = Long.MIN_VALUE
     private var lastHatY = 0f
+    private var navAxisMs = Long.MIN_VALUE
+    private var navHatY = 0f
+
+    /** Direction to inject into the 2D focus system while the quick panel is closed. */
+    var pendingNavDirection: Int = 0
+        private set
 
     sealed class Command {
         object PassThrough : Command()
@@ -50,6 +56,9 @@ class VrGamepadRouter {
     fun resetAxisHold() {
         lastAxisMs = Long.MIN_VALUE
         lastHatY = 0f
+        navAxisMs = Long.MIN_VALUE
+        navHatY = 0f
+        pendingNavDirection = 0
     }
 
     /** Called by VrSession once the armed long-press has elapsed. */
@@ -116,6 +125,44 @@ class VrGamepadRouter {
             return Command.Adjust(if (x < 0) -1 else 1)
         }
         return Command.Consumed
+    }
+
+    /**
+     * Stick/HAT navigation for the ordinary 2D screens while VR is on and the
+     * quick panel is closed. Does NOT touch menu state; the host drains
+     * [pendingNavDirection] and injects one DPAD key per repeat window.
+     */
+    fun onUiNavigation(x: Float, y: Float, hatY: Float, timeMs: Long): Boolean {
+        if (!vrEnabled || panelOpen) return false
+        val hat = when {
+            hatY < -0.5f -> -1f
+            hatY > 0.5f -> 1f
+            else -> 0f
+        }
+        if (hat != navHatY) {
+            navHatY = hat
+            if (hat != 0f) {
+                pendingNavDirection = hat.toInt()
+                navAxisMs = timeMs
+                return true
+            }
+        }
+        if (navAxisMs != Long.MIN_VALUE && timeMs - navAxisMs < repeatMs) return false
+        val direction = when {
+            abs(y) > deadZone && abs(y) >= abs(x) -> if (y < 0) -1 else 1
+            abs(x) > deadZone -> if (x < 0) -2 else 2
+            else -> 0
+        }
+        if (direction == 0) return false
+        navAxisMs = timeMs
+        pendingNavDirection = direction
+        return true
+    }
+
+    fun drainNavDirection(): Int {
+        val value = pendingNavDirection
+        pendingNavDirection = 0
+        return value
     }
 
     /** Many pads report the D-pad as AXIS_HAT_Y instead of DPAD keycodes. */

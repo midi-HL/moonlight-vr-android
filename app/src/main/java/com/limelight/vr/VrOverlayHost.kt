@@ -37,7 +37,7 @@ class VrOverlayHost(private val activity: Activity, private val decor: ViewGroup
 
     private fun install() {
         if (installed) return
-        val theater = VrTheaterView(activity, decor)
+        val theater = VrTheaterView(activity, decor, activity is com.limelight.Game)
         theaterView = theater
         decor.addView(theater, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,

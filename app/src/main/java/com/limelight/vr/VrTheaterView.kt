@@ -17,12 +17,12 @@ import com.google.cardboard.sdk.CardboardView
  * transparent GL layer on some devices (documented failure in OpenNOW-VR).
  * The 2D SurfaceViews are deliberately left alive behind the GL layer.
  */
-class VrTheaterView(context: Context, decor: View) : CardboardView(context) {
+class VrTheaterView(context: Context, decor: View, private val isVideoHost: Boolean) : CardboardView(context) {
     companion object { private const val TAG = "VrTheaterView" }
 
     val panelView = VrPanelView(context)
-    private val capture = VrWindowCapture(decor, panelView)
-    private val renderer = VrTheaterRenderer(capture)
+    private val capture = VrWindowCapture(decor, panelView, isVideoHost)
+    private val renderer = VrTheaterRenderer(capture, isVideoHost)
 
     init {
         promoteGlSurface()
@@ -63,7 +63,8 @@ class VrTheaterView(context: Context, decor: View) : CardboardView(context) {
         renderer.markMeshDirty()
     }
 
-    fun recenter() = renderer.recenter()
+    /** Marshalled onto the GL thread so head-pose state is not read concurrently. */
+    fun recenter() = queueEvent { renderer.recenter() }
 
     fun stop() {
         Log.i(TAG, "stop: onPause")
@@ -73,6 +74,7 @@ class VrTheaterView(context: Context, decor: View) : CardboardView(context) {
     fun release() {
         Log.i(TAG, "release: onDestroy")
         capture.stop()
+        queueEvent { renderer.release() }
         onDestroy()
     }
 

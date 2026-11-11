@@ -54,7 +54,14 @@ object VrQuickPanel {
     }
 
     fun withValue(settings: VrSettings, key: String, value: Float): VrSettings {
-        val v = value.coerceIn(0f, 2.2f)
+        // Each row has its own unit and range (metres, milliseconds, ratios).
+        // A single global clamp would silently truncate distance/repeat values.
+        val row = rows.firstOrNull { it.key == key }
+        val v = if (row != null && row.kind == Kind.RANGE) {
+            value.coerceIn(row.min, row.max)
+        } else {
+            value
+        }
         return when (key) {
             VrSettingsStore.K_ENABLED -> settings.copy(enabled = v >= 0.5f)
             VrSettingsStore.K_SCALE -> settings.copy(screenScale = v)

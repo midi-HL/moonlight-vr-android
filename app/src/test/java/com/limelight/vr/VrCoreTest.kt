@@ -27,11 +27,17 @@ class VrCoreTest {
         val enter = router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_DOWN, true)
         assertTrue(enter is VrGamepadRouter.Command.ToggleVr)
 
+        // Simulate VrSession flipping the flag WITHOUT clearing pressed keys:
+        // the combo is still physically held, so it must not toggle again.
         router.vrEnabled = true
-        router.reset()
-        assertTrue(router.onKey(VrKeys.BUTTON_L1, VrKeys.ACTION_DOWN, true) is VrGamepadRouter.Command.PassThrough)
-        val inVr = router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_DOWN, true)
-        assertFalse(inVr is VrGamepadRouter.Command.ToggleVr)
+        assertFalse(router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.ToggleVr)
+        router.onKey(VrKeys.BUTTON_L1, VrKeys.ACTION_UP, true)
+        router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_UP, true)
+        assertTrue(router.onKey(VrKeys.BUTTON_L1, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.PassThrough)
+        assertFalse(router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.ToggleVr)
     }
 
     @Test
@@ -89,6 +95,32 @@ class VrCoreTest {
         assertEquals(1.15f, up.screenScale, 0.0001f)
         val down = VrQuickPanel.adjust(row, base, -100)
         assertEquals(row.min, down.screenScale, 0.0001f)
+    }
+
+    @Test
+    fun distanceAndRepeatAreNotTruncatedByScaleClamp() {
+        val distance = VrQuickPanel.rows.first { it.key == VrSettingsStore.K_DISTANCE }
+        val repeat = VrQuickPanel.rows.first { it.key == VrSettingsStore.K_REPEAT }
+        assertEquals(5f, VrQuickPanel.withValue(VrSettings.DEFAULT, distance.key, 5f)
+            .screenDistanceMeters, 0.0001f)
+        assertEquals(400L, VrQuickPanel.withValue(VrSettings.DEFAULT, repeat.key, 400f)
+            .menuRepeatMs)
+        // Each row clamps to ITS OWN range, not a shared 0..2.2.
+        assertEquals(5f, VrQuickPanel.adjust(distance, VrSettings.DEFAULT
+            .copy(screenDistanceMeters = 4.95f), 1).screenDistanceMeters, 0.0001f)
+    }
+
+    @Test
+    fun uiNavigationInjectsDirectionsWithoutTouchingMenuState() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertTrue(router.onUiNavigation(0f, 0f, 1f, 1000L))
+        assertEquals(1, router.drainNavDirection())
+        assertEquals(0, router.drainNavDirection())
+        // Held HAT must not repeat; a fresh deflection after the repeat window can.
+        assertFalse(router.onUiNavigation(0f, 0f, 1f, 1050L))
+        assertTrue(router.onUiNavigation(0.9f, 0f, 0f, 1200L))
+        assertEquals(2, router.drainNavDirection())
+        assertFalse(router.panelOpen)
     }
 
     @Test

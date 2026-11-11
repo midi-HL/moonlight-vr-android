@@ -28,7 +28,10 @@ import javax.microedition.khronos.egl.EGLConfig
  * stereo of a virtual screen, not SBS 3D video. Head pose only changes the view
  * matrix; it never selects or clicks anything.
  */
-class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Renderer {
+class VrTheaterRenderer(
+    private val capture: VrWindowCapture,
+    private val isVideoHost: Boolean,
+) : CardboardView.Renderer {
     companion object {
         private const val TAG = "VrTheaterRenderer"
         private const val VERTEX_SHADER = """
@@ -116,7 +119,7 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
         video = runCatching { createHandles(VIDEO_FRAGMENT_SHADER) }
             .onFailure { Log.e(TAG, "video shader link failed", it) }.getOrNull()
         panelTextureId = genTexture(GLES20.GL_TEXTURE_2D)
-        setupVideoTexture()
+        if (isVideoHost) setupVideoTexture()
     }
 
     private fun createHandles(fragment: String): Handles {
@@ -151,14 +154,24 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
         val output = Surface(texture)
         videoSurfaceTexture = texture
         videoSurface = output
-        VrVideoSurfaceRegistry.install(videoTextureId, texture, output)
+        VrVideoSurfaceRegistry.install(videoTextureId, texture, output, this)
     }
 
     override fun onSurfaceChanged(width: Int, height: Int) = Unit
 
     override fun onNewFrame(headTransform: HeadTransform) {
         headTransform.getQuaternion(headQuaternion, 0)
-        if (VrVideoSurfaceRegistry.consumeFrameAvailable()) {
+        // One capture per FRAME, not per eye. Both onDrawEye calls use the same
+        // uploaded GL texture, so consuming on each eye would drop half the UI.
+        val bitmap = capture.consume()
+        if (bitmap != null && panelTextureId != 0) {
+            upload(bitmap)
+            if (!loggedFirstFrame) {
+                loggedFirstFrame = true
+                Log.i(TAG, "first window frame ${bitmap.width}x${bitmap.height} uploaded")
+            }
+        }
+        if (isVideoHost && VrVideoSurfaceRegistry.consumeFrameAvailable()) {
             val texture = videoSurfaceTexture ?: return
             try {
                 texture.updateTexImage()
@@ -171,6 +184,7 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
         }
     }
 
+    /** Recentre is marshalled onto the GL thread; see VrTheaterView.recenter(). */
     fun recenter() {
         centerQuaternion[0] = headQuaternion[0]
         centerQuaternion[1] = headQuaternion[1]
@@ -182,14 +196,6 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
         val s = VrSession.settings
         if (s.screenScale != lastScale || s.screenDistanceMeters != lastDistance ||
             s.curvature != lastCurvature) meshDirty = true
-        val bitmap = capture.consume()
-        if (bitmap != null && panelTextureId != 0) {
-            upload(bitmap)
-            if (!loggedFirstFrame) {
-                loggedFirstFrame = true
-                Log.i(TAG, "first window frame ${bitmap.width}x${bitmap.height} uploaded")
-            }
-        }
         if (meshDirty && textureWidth > 0) rebuildMesh(textureWidth.toFloat() / textureHeight.toFloat())
         if (vertexCount == 0) return
 
@@ -298,8 +304,14 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
 
     override fun onFinishFrame(viewport: Viewport) = Unit
 
-    override fun onRendererShutdown() {
-        VrVideoSurfaceRegistry.clear()
+    override fun onRendererShutdown() = release()
+
+    /**
+     * Idempotent cleanup. CardboardView.onDestroy() only stops the GL thread, so
+     * VrTheaterView also calls this through queueEvent() before shutting down.
+     */
+    fun release() {
+        VrVideoSurfaceRegistry.clear(this)
         videoSurface?.release()
         videoSurfaceTexture?.release()
         videoSurface = null
@@ -308,8 +320,13 @@ class VrTheaterRenderer(private val capture: VrWindowCapture) : CardboardView.Re
         if (videoTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(videoTextureId), 0)
         panel?.let { GLES20.glDeleteProgram(it.program) }
         video?.let { GLES20.glDeleteProgram(it.program) }
+        panelTextureId = 0
+        videoTextureId = 0
+        panel = null
+        video = null
         uploaded?.recycle()
         uploaded = null
+        capture.releasePending()
         hasVideoFrame = false
     }
 }

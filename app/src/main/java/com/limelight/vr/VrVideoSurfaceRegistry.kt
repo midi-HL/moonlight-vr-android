@@ -18,6 +18,7 @@ internal object VrVideoSurfaceRegistry {
     @Volatile private var surface: Surface? = null
     @Volatile private var textureId: Int = 0
     @Volatile private var decoder: WeakReference<MediaCodecDecoderRenderer>? = null
+    @Volatile private var surfaceOwner: Any? = null
     private val frameAvailable = AtomicBoolean(false)
 
     val isActive: Boolean get() = surface != null
@@ -39,19 +40,26 @@ internal object VrVideoSurfaceRegistry {
     }
 
     /** GL thread only. */
-    fun install(id: Int, texture: SurfaceTexture, output: Surface) {
+    fun install(id: Int, texture: SurfaceTexture, output: Surface, owner: Any) {
         clear()
         textureId = id
         surfaceTexture = texture
         surface = output
+        surfaceOwner = owner
         texture.setOnFrameAvailableListener { markFrameAvailable() }
         decoder?.get()?.setVrOutputSurface(output)
     }
 
-    /** Drops references and restores the 2D surface; the GL renderer owns release. */
-    fun clear() {
+    /**
+     * Drops references and restores the 2D surface. [owner] guards against a
+     * stale non-video Activity stopping its GL thread after a newer Game host
+     * has already installed its own surface.
+     */
+    fun clear(owner: Any? = null) {
+        if (owner != null && surfaceOwner !== owner) return
         surface = null
         surfaceTexture = null
+        surfaceOwner = null
         textureId = 0
         frameAvailable.set(false)
         decoder?.get()?.setVrOutputSurface(null)

@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
 class VrWindowCapture(
     private val source: View,
     private val panel: VrPanelView,
+    private val isVideoHost: Boolean,
 ) {
     private val uiHandler = Handler(Looper.getMainLooper())
     private val pending = AtomicReference<Bitmap?>(null)
@@ -43,6 +44,14 @@ class VrWindowCapture(
 
     fun stop() {
         uiHandler.removeCallbacks(tick)
+        // Do NOT recycle here: the GL thread may have already consumed the
+        // Bitmap and be uploading it. Ownership transfer is atomic at
+        // consume(); anything still in pending is recycled by the GL shutdown.
+        pending.set(null)
+    }
+
+    /** GL thread only, from the renderer shutdown path. */
+    fun releasePending() {
         pending.getAndSet(null)?.recycle()
     }
 
@@ -76,14 +85,28 @@ class VrWindowCapture(
             c.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
             // Exclude the CardboardView itself, otherwise we feed the VR picture
             // back into its own texture (infinite feedback / growing lag).
-            val excluded = findTheater(source)
-            val wasHidden = excluded?.visibility
-            excluded?.visibility = View.INVISIBLE
+            // On the streaming screen also hide the full-screen background View
+            // so the video quad stays visible underneath the UI-only overlay.
+            val hiddenViews = mutableListOf<Pair<View, Int>>()
+            fun hide(view: View) {
+                hiddenViews += view to view.visibility
+                view.visibility = View.INVISIBLE
+            }
+            findTheater(source)?.let(::hide)
+            if (isVideoHost) {
+                source.findViewById<View>(
+                    source.resources.getIdentifier("backgroundTouchView", "id", source.context.packageName)
+                )?.let(::hide)
+            }
             try {
                 source.draw(c)
             } finally {
-                wasHidden?.let { excluded?.visibility = it }
+                hiddenViews.forEach { (view, visibility) -> view.visibility = visibility }
             }
+            // Dialog windows are composited separately by SurfaceFlinger and are
+            // NOT part of the Activity decor. Draw their registered decors on
+            // top, otherwise a settings dialog would be invisible in VR.
+            VrSession.activeDialogDecors().forEach { dialogDecor -> dialogDecor.draw(c) }
             if (VrSession.panelOpen) {
                 panel.drawInto(c, VrSession.settings, VrSession.selectedIndex, VrSession.editing)
             }
