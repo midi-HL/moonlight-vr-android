@@ -71,7 +71,7 @@ object VrInputDispatcher {
             ?: activity.window?.decorView ?: return false
         // Send a complete DOWN+UP pair so Android's focus finder moves exactly once.
         val down = KeyEvent(event.downTime, event.eventTime, KeyEvent.ACTION_DOWN,
-            keyCode, 0, event.metaState, event.deviceId, event.scanCode, event.flags, event.source)
+            keyCode, 0, event.metaState, event.deviceId, 0, event.flags, event.source)
         val up = KeyEvent.changeAction(down, KeyEvent.ACTION_UP)
         decor.dispatchKeyEvent(down)
         decor.dispatchKeyEvent(up)
