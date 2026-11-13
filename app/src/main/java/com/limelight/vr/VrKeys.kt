@@ -111,4 +111,6 @@ object VrKeys {
     const val PAGE_PREV_KEY = BUTTON_L1
     const val PAGE_NEXT_KEY = BUTTON_R1
 
+    /** Native focus navigation keys delivered straight to the decor in VR. */
+    val FOCUS_KEYS = intArrayOf(DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, DPAD_CENTER)
 }

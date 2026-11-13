@@ -132,6 +132,16 @@ class VrCoreTest {
     }
 
     @Test
+    fun focusKeysCoverNativeDpadNavigationOnly() {
+        assertEquals(setOf(VrKeys.DPAD_UP, VrKeys.DPAD_DOWN, VrKeys.DPAD_LEFT,
+            VrKeys.DPAD_RIGHT, VrKeys.DPAD_CENTER), VrKeys.FOCUS_KEYS.toSet())
+        // Game keys must NOT be swallowed by the focus path: the stream still
+        // needs START / MODE / X / Y / triggers while VR is on.
+        assertFalse(VrKeys.BUTTON_START in VrKeys.FOCUS_KEYS)
+        assertFalse(VrKeys.BUTTON_X in VrKeys.FOCUS_KEYS)
+    }
+
+    @Test
     fun vrPreferenceKeysAreRecognised() {
         assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_ENABLED))
         assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_IPD))

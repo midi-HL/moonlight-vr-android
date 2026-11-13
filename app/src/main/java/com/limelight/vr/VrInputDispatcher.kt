@@ -37,6 +37,14 @@ object VrInputDispatcher {
             return isGamepad
         }
         if (!isGamepad) return false
+        // This app KEEPS THE 2D UI LIVE in VR and streams controller input to
+        // the host, so unlike OpenNOW-VR we must NOT swallow every unhandled
+        // key: Game.onKeyDown / KeyboardInputRouter need them. Only D-pad is
+        // delivered straight to the decor (native focus navigation) to avoid
+        // re-entering this Window.Callback hook through the Activity.
+        if (event.keyCode in VrKeys.FOCUS_KEYS) {
+            return activity.window?.decorView?.dispatchKeyEvent(event) ?: true
+        }
         val mapped = mapKey(event.keyCode) ?: return false
         val clone = KeyEvent(
             event.downTime, event.eventTime, event.action, mapped,
