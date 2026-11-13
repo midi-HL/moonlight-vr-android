@@ -127,8 +127,25 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     /** Returns true when the event was consumed by the VR layer. */
     fun onKeyEvent(event: KeyEvent): Boolean {
-        val source = event.source
-        val isGamepad = VrGamepadRouter.isGamepad(source)
+        // P-E8: several Bluetooth pads report face buttons / D-pad as
+        // SOURCE_KEYBOARD. While VR is on we must NOT gate on source, otherwise
+        // every menu key is handed to the hidden 2D UI and the panel is dead.
+        // The router only emits commands for a small explicit key whitelist, so
+        // letting all sources through is safe. When VR is off we keep the gate
+        // so ordinary keyboards and the 2D UI are untouched.
+        val isGamepad = !enabled || VrGamepadRouter.isGamepad(event.source)
+
+        // P-E2: while VR is on, BACK is owned by the VR layer for BOTH actions.
+        // Acting on DOWN used to let the subsequent UP fall through to the 2D
+        // back stack and finish() the Activity. Only UP performs the action.
+        if (enabled && event.keyCode == VrKeys.BACK) {
+            if (event.action == VrKeys.ACTION_UP) {
+                if (panelOpen) setPanelOpen(false)
+                else setEnabled(app ?: return true, false)
+            }
+            return true
+        }
+
         val command = router.onKey(event.keyCode, event.action, isGamepad)
         return handle(command)
     }
@@ -317,7 +334,13 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     /** Original per-Activity window state, restored verbatim when VR is turned off. */
-    private data class WindowState(val uiVisibility: Int, val keepScreenOn: Boolean)
+    private data class WindowState(
+        val uiVisibility: Int,
+        val keepScreenOn: Boolean,
+        val orientation: Int,
+        val layoutNoLimits: Boolean,
+        val cutoutMode: Int?,
+    )
     private val windowStates = HashMap<Activity, WindowState>()
 
     private fun applyImmersive(activity: Activity) {
@@ -328,11 +351,25 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val window = activity.window
         @Suppress("DEPRECATION")
         windowStates.getOrPut(activity) {
+            val attrs = window.attributes
             WindowState(
                 uiVisibility = window.decorView.systemUiVisibility,
-                keepScreenOn = window.attributes.flags and
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0,
+                keepScreenOn = (attrs.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0,
+                orientation = activity.requestedOrientation,
+                layoutNoLimits = (attrs.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) != 0,
+                cutoutMode = if (android.os.Build.VERSION.SDK_INT >= 28)
+                    attrs.layoutInDisplayCutoutMode else null,
             )
+        }
+        // P-D9: hiding the system bars alone is NOT fullscreen. Force landscape,
+        // let decor content extend under the status bar / gesture area / notch.
+        activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.also {
+                it.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
         }
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
@@ -350,8 +387,18 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val state = windowStates.remove(activity) ?: return
         @Suppress("DEPRECATION")
         activity.window.decorView.systemUiVisibility = state.uiVisibility
+        activity.requestedOrientation = state.orientation
         if (!state.keepScreenOn) {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        if (!state.layoutNoLimits) {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        }
+        val cutout = state.cutoutMode
+        if (android.os.Build.VERSION.SDK_INT >= 28 && cutout != null) {
+            activity.window.attributes = activity.window.attributes.also {
+                it.layoutInDisplayCutoutMode = cutout
+            }
         }
     }
 

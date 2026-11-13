@@ -23,7 +23,9 @@ import android.view.View
  */
 object VrInputDispatcher {
     fun dispatchKey(activity: Activity, event: KeyEvent): Boolean {
-        val isGamepad = VrGamepadRouter.isGamepad(event.source)
+        // P-E8: while VR is on, treat every source as a potential controller.
+        // Bluetooth pads frequently report face buttons as SOURCE_KEYBOARD.
+        val isGamepad = if (VrSession.enabled) true else VrGamepadRouter.isGamepad(event.source)
         if (!VrSession.enabled) {
             // L1+R1 is a global "enter VR" shortcut, even on the home page.
             return VrSession.onKeyEvent(event)
@@ -51,7 +53,7 @@ object VrInputDispatcher {
     fun dispatchMotion(activity: Activity, event: MotionEvent): Boolean {
         if (VrSession.onMotionEvent(event)) return true
         if (!VrSession.enabled || VrSession.panelOpen) return false
-        if (!VrGamepadRouter.isGamepad(event.source)) return false
+        // Same P-E8 rule as dispatchKey: no source gate while VR is on.
         VrSession.onUiNavigation(
             event.getAxisValue(VrKeys.AXIS_X),
             event.getAxisValue(VrKeys.AXIS_Y),

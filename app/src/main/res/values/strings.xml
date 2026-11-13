@@ -2564,4 +2564,10 @@ Tap again to replace it.</string>
     <string name="summary_vr_repeat">在 VR 内按住摇杆连续调值的速度</string>
     <string name="title_vr_recenter_on_enter">进入时重置中心</string>
     <string name="summary_vr_recenter_on_enter">进入 VR 时把当前朝向记为正前方</string>
+    <string name="title_vr_zoom">整体放大（上下填满）</string>
+    <string name="summary_vr_zoom">对最终双目画面做中心等比放大，把畸变造成的上下黑边推出屏幕；1.00x 为原版</string>
+    <string name="title_vr_vertical_flip">串流画面上下翻转</string>
+    <string name="summary_vr_vertical_flip">MediaCodec 外部纹理天然 V 轴倒置，默认开启即正立；若解码链路方向相反可关闭</string>
+    <string name="title_vr_align_line">中心辅助线</string>
+    <string name="summary_vr_align_line">在物理屏幕正中画一条固定竖线，不随头部转动、不被放大影响</string>
 </resources>

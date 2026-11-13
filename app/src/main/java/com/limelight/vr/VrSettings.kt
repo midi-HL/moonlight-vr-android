@@ -17,6 +17,12 @@ data class VrSettings(
     val menuRepeatMs: Long = DEFAULT.menuRepeatMs,
     val ipdScale: Float = DEFAULT.ipdScale,
     val recenterOnEnter: Boolean = DEFAULT.recenterOnEnter,
+    /** P-D5: centre zoom applied to the SDK's final stereo frame in onFinishFrame(). */
+    val zoomScale: Float = DEFAULT.zoomScale,
+    /** P-C1: MediaCodec->OES is natively V-inverted; default ON = upright stream. */
+    val verticalFlip: Boolean = DEFAULT.verticalFlip,
+    /** P-D7: fixed screen-space centre alignment line, drawn after zoom. */
+    val showCenterAlignmentLine: Boolean = DEFAULT.showCenterAlignmentLine,
 ) {
     fun sanitized(): VrSettings = copy(
         screenScale = screenScale.coerceIn(MIN_SCALE, MAX_SCALE),
@@ -27,6 +33,7 @@ data class VrSettings(
         gamepadDeadZone = gamepadDeadZone.coerceIn(0.05f, 0.5f),
         menuRepeatMs = menuRepeatMs.coerceIn(60L, 400L),
         ipdScale = ipdScale.coerceIn(0.5f, 1.6f),
+        zoomScale = zoomScale.coerceIn(MIN_ZOOM, MAX_ZOOM),
     )
 
     companion object {
@@ -42,6 +49,11 @@ data class VrSettings(
             menuRepeatMs = 140L,
             ipdScale = 1f,
             recenterOnEnter = true,
+            // OpenNOW-VR §17.4: 1.18 was too small, 1.35 fills the vertical
+            // black bands on a typical Cardboard QR profile. 1.00 = no-op.
+            zoomScale = 1.35f,
+            verticalFlip = true,
+            showCenterAlignmentLine = false,
         )
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2.2f
@@ -49,5 +61,8 @@ data class VrSettings(
         const val MAX_DISTANCE = 5f
         const val MIN_BRIGHTNESS = 0.3f
         const val MAX_BRIGHTNESS = 1f
+        const val MIN_ZOOM = 1.00f
+        const val MAX_ZOOM = 2.50f
+        const val ZOOM_STEP = 0.05f
     }
 }

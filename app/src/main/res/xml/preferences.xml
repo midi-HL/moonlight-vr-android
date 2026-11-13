@@ -1467,5 +1467,26 @@
             android:title="@string/title_vr_recenter_on_enter"
             android:summary="@string/summary_vr_recenter_on_enter"
             android:defaultValue="true" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="vr_zoom_scale"
+            android:title="@string/title_vr_zoom"
+            android:summary="@string/summary_vr_zoom"
+            android:defaultValue="1350"
+            seekbar:min="1000"
+            android:max="2500"
+            seekbar:step="50"
+            seekbar:keyStep="1"
+            seekbar:divisor="1000"
+            android:text="x" />
+        <CheckBoxPreference
+            android:key="vr_vertical_flip"
+            android:title="@string/title_vr_vertical_flip"
+            android:summary="@string/summary_vr_vertical_flip"
+            android:defaultValue="true" />
+        <CheckBoxPreference
+            android:key="vr_center_alignment_line"
+            android:title="@string/title_vr_align_line"
+            android:summary="@string/summary_vr_align_line"
+            android:defaultValue="false" />
     </PreferenceCategory>
 </PreferenceScreen>

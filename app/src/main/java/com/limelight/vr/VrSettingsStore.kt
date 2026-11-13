@@ -26,6 +26,9 @@ object VrSettingsStore {
     const val K_REPEAT = "vr_menu_repeat_ms"
     const val K_IPD = "vr_ipd_scale"
     const val K_RECENTER = "vr_recenter_on_enter"
+    const val K_ZOOM = "vr_zoom_scale"
+    const val K_V_FLIP = "vr_vertical_flip"
+    const val K_ALIGN_LINE = "vr_center_alignment_line"
 
     private const val M = 1000
 
@@ -43,6 +46,9 @@ object VrSettingsStore {
             menuRepeatMs = p.getInt(K_REPEAT, VrSettings.DEFAULT.menuRepeatMs.toInt()).toLong(),
             ipdScale = milli(p, K_IPD, VrSettings.DEFAULT.ipdScale),
             recenterOnEnter = p.getBoolean(K_RECENTER, VrSettings.DEFAULT.recenterOnEnter),
+            zoomScale = milli(p, K_ZOOM, VrSettings.DEFAULT.zoomScale),
+            verticalFlip = p.getBoolean(K_V_FLIP, VrSettings.DEFAULT.verticalFlip),
+            showCenterAlignmentLine = p.getBoolean(K_ALIGN_LINE, VrSettings.DEFAULT.showCenterAlignmentLine),
         ).sanitized()
     }
 
@@ -60,6 +66,9 @@ object VrSettingsStore {
             .putInt(K_REPEAT, s.menuRepeatMs.toInt())
             .putInt(K_IPD, (s.ipdScale * M).toInt())
             .putBoolean(K_RECENTER, s.recenterOnEnter)
+            .putInt(K_ZOOM, (s.zoomScale * M).toInt())
+            .putBoolean(K_V_FLIP, s.verticalFlip)
+            .putBoolean(K_ALIGN_LINE, s.showCenterAlignmentLine)
             .apply()
     }
 
@@ -71,7 +80,8 @@ object VrSettingsStore {
 
     fun isVrKey(key: String?): Boolean = when (key) {
         K_ENABLED, K_SCALE, K_DISTANCE, K_BRIGHTNESS, K_CURVATURE,
-        K_HEAD, K_HEAD_SENS, K_DEAD_ZONE, K_REPEAT, K_IPD, K_RECENTER -> true
+        K_HEAD, K_HEAD_SENS, K_DEAD_ZONE, K_REPEAT, K_IPD, K_RECENTER,
+        K_ZOOM, K_V_FLIP, K_ALIGN_LINE -> true
         else -> false
     }
 
@@ -95,4 +105,7 @@ object VrPreferenceKeys {
     const val REPEAT = VrSettingsStore.K_REPEAT
     const val IPD = VrSettingsStore.K_IPD
     const val RECENTER = VrSettingsStore.K_RECENTER
+    const val ZOOM = VrSettingsStore.K_ZOOM
+    const val VERTICAL_FLIP = VrSettingsStore.K_V_FLIP
+    const val ALIGN_LINE = VrSettingsStore.K_ALIGN_LINE
 }

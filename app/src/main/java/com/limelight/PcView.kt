@@ -669,37 +669,40 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
 
     /**
      * VR is available from the home page itself: no need to start a stream first.
-     * The button is created in code so the existing toolbar XML stays untouched.
+     *
+     * The entry MUST be centred and large enough to survive Cardboard's barrel
+     * distortion. An earlier version inserted this button next to the top-left
+     * toolbar anchor with no RelativeLayout rules, so Android placed it at (0,0)
+     * — the exact corner that a Cardboard lens crops away, making it almost
+     * impossible to hit while wearing the headset (OpenNOW-VR P-F2 / §15.5).
      */
     private fun installVrEntryButton() {
-        val anchor = findViewById<View>(R.id.settingsButton) ?: return
-        val parent = anchor.parent as? android.view.ViewGroup ?: return
-        if (parent.findViewWithTag<View>(VR_BUTTON_TAG) != null) return
+        val root = findViewById<android.view.ViewGroup>(android.R.id.content) ?: return
+        if (root.findViewWithTag<View>(VR_BUTTON_TAG) != null) return
         val button = android.widget.Button(this).apply {
             tag = VR_BUTTON_TAG
-            text = "VR"
+            text = "进入 VR"
             isAllCaps = false
-            textSize = 12f
+            textSize = 16f
             setTextColor(android.graphics.Color.WHITE)
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(android.graphics.Color.argb(210, 30, 110, 180))
-                cornerRadius = dpToPx(12).toFloat()
+                setColor(android.graphics.Color.argb(225, 30, 110, 180))
+                cornerRadius = dpToPx(18).toFloat()
             }
-            layoutParams = when (parent) {
-                is android.widget.LinearLayout -> android.widget.LinearLayout.LayoutParams(
-                    dpToPx(46), dpToPx(34),
-                ).apply { setMargins(dpToPx(6), 0, 0, 0) }
-                else -> android.widget.FrameLayout.LayoutParams(
-                    dpToPx(46), dpToPx(34),
-                )
-            }
+            setPadding(dpToPx(22), dpToPx(10), dpToPx(22), dpToPx(10))
+            // Centre-bottom: visible in both eyes, away from the top-left lens crop
+            // and away from the existing toolbar buttons.
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.CENTER_HORIZONTAL or android.view.Gravity.BOTTOM,
+            ).apply { bottomMargin = dpToPx(28) }
             setOnClickListener {
                 com.limelight.vr.VrSession.setEnabled(this@PcView, true)
             }
             isFocusable = true
         }
-        val index = parent.indexOfChild(anchor)
-        parent.addView(button, index + 1)
+        root.addView(button)
     }
 
     private fun showPcToolbarMenu(anchor: View) {

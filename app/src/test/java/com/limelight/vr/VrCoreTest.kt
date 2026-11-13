@@ -135,6 +135,70 @@ class VrCoreTest {
     fun vrPreferenceKeysAreRecognised() {
         assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_ENABLED))
         assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_IPD))
+        assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_ZOOM))
+        assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_V_FLIP))
+        assertTrue(VrSettingsStore.isVrKey(VrSettingsStore.K_ALIGN_LINE))
         assertFalse(VrSettingsStore.isVrKey("list_resolution"))
+    }
+
+    @Test
+    fun zoomAndVerticalFlipDefaultsMatchRealDeviceFindings() {
+        // OpenNOW-VR §17.4 / §25.3: 1.35 fills the bands, OES is natively inverted.
+        assertEquals(1.35f, VrSettings.DEFAULT.zoomScale, 0.0001f)
+        assertTrue(VrSettings.DEFAULT.verticalFlip)
+        assertEquals(2.50f, VrSettings.MAX_ZOOM)
+        assertEquals(2.50f, VrSettings.DEFAULT.copy(zoomScale = 99f).sanitized().zoomScale, 0.0001f)
+        assertEquals(1.00f, VrSettings.DEFAULT.copy(zoomScale = 0.1f).sanitized().zoomScale, 0.0001f)
+    }
+
+    @Test
+    fun everyRowHasItsOwnClampIncludingZoom() {
+        val zoom = VrQuickPanel.rows.first { it.key == VrSettingsStore.K_ZOOM }
+        val maxed = VrQuickPanel.withValue(VrSettings.DEFAULT, zoom.key, 2.5f)
+        assertEquals(2.5f, maxed.zoomScale, 0.0001f)
+        val flippedOff = VrQuickPanel.toggle(
+            VrQuickPanel.rows.first { it.key == VrSettingsStore.K_V_FLIP },
+            VrSettings.DEFAULT.copy(verticalFlip = true),
+        )
+        assertFalse(flippedOff.verticalFlip)
+    }
+
+    @Test
+    fun statelessScrollWindowAlwaysContainsSelection() {
+        val size = VrQuickPanel.rows.size
+        for (selected in 0 until size) {
+            val window = VrQuickPanel.visibleWindowFor(selected)
+            assertTrue("selected=$selected window=$window", window.contains(selected))
+            assertEquals(VrQuickPanel.VISIBLE_ROWS, window.count())
+            assertTrue(window.first >= 0 && window.last < size)
+        }
+        // A hypothetical 60-row future page still scrolls correctly (P-F1).
+        assertEquals(0, VrQuickPanel.visibleWindowFor(0).first)
+    }
+
+    @Test
+    fun resetAxisHoldKeepsHeldHatEdge() {
+        val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
+        assertTrue(router.onHat(1f) is VrGamepadRouter.Command.Move)
+        router.resetAxisHold() // e.g. pressing A while the D-pad is still held
+        // Must NOT fire a second Move for the same physical hold (P-E7).
+        assertTrue(router.onHat(1f) is VrGamepadRouter.Command.Consumed)
+        assertTrue(router.onHat(0f) is VrGamepadRouter.Command.Consumed)
+        assertTrue(router.onHat(1f) is VrGamepadRouter.Command.Move)
+    }
+
+    @Test
+    fun staleHeldShouldersCannotReenterVrOnRepeat() {
+        val router = VrGamepadRouter()
+        router.onKey(VrKeys.BUTTON_L1, VrKeys.ACTION_DOWN, true)
+        assertTrue(router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.ToggleVr)
+        router.vrEnabled = true
+        // OS key-repeat of a still-held shoulder must be consumed, never toggle.
+        assertTrue(router.onKey(VrKeys.BUTTON_R1, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.Consumed)
+        // An unrelated key while the shoulders remain held must also not toggle.
+        assertFalse(router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN, true)
+            is VrGamepadRouter.Command.ToggleVr)
     }
 }

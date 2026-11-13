@@ -31,8 +31,14 @@ class VrActivityHooks(private val activity: Activity, private val delegate: Wind
         return delegate.dispatchGenericMotionEvent(event)
     }
 
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean =
-        delegate.dispatchTouchEvent(event)
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // P-E1: with the GL layer promoted on top, the 2D UI is invisible but
+        // still focusable/touchable. A stray tap inside the headset used to open
+        // a hidden dialog and steal input. Swallow the whole gesture while VR is
+        // on; the VR panel and 2D screens are fully gamepad-driven.
+        if (VrSession.enabled) return true
+        return delegate.dispatchTouchEvent(event)
+    }
 
     override fun dispatchTrackballEvent(event: MotionEvent): Boolean =
         delegate.dispatchTrackballEvent(event)

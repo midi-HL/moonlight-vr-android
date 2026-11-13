@@ -90,7 +90,20 @@ class VrPanelView(context: Context) : View(context) {
             y += 46f
         }
 
-        val footer = "${selectedIndex + 1}/${rows.size}  ·  修改即时生效，无需退出串流"
+        // P-F1: explicit scroll affordance so rows beyond the visible window are
+        // discoverable instead of silently clipped.
+        if (rows.size > visibleRows) {
+            val trackTop = card.top + 136f
+            val trackBottom = card.bottom - footerRoom
+            val trackX = card.right - 18f
+            canvas.drawRoundRect(RectF(trackX - 3f, trackTop, trackX + 3f, trackBottom), 3f, 3f, track)
+            val thumbH = (trackBottom - trackTop) * visibleRows / rows.size
+            val thumbTop = trackTop + (trackBottom - trackTop - thumbH) *
+                window.first / (rows.size - visibleRows).coerceAtLeast(1)
+            canvas.drawRoundRect(RectF(trackX - 5f, thumbTop, trackX + 5f, thumbTop + thumbH), 5f, 5f, bar)
+        }
+        val footer = "${window.first + 1}-${window.last + 1}/${rows.size}  ·  " +
+            "修改即时生效，无需退出串流"
         canvas.drawText(footer, card.left + 44f, card.bottom - 28f, hint)
     }
 

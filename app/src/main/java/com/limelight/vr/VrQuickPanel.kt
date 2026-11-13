@@ -34,6 +34,10 @@ object VrQuickPanel {
         Row(VrSettingsStore.K_DEAD_ZONE, "手柄死区", Kind.RANGE, 0.05f, 0.5f, 0.01f) { "%.2f".format(it) },
         Row(VrSettingsStore.K_REPEAT, "按键重复", Kind.RANGE, 60f, 400f, 20f) { "%.0fms".format(it) },
         Row(VrSettingsStore.K_RECENTER, "进入时重置中心", Kind.TOGGLE),
+        Row(VrSettingsStore.K_ZOOM, "整体放大", Kind.RANGE,
+            VrSettings.MIN_ZOOM, VrSettings.MAX_ZOOM, VrSettings.ZOOM_STEP) { "%.2fx".format(it) },
+        Row(VrSettingsStore.K_V_FLIP, "串流上下翻转", Kind.TOGGLE),
+        Row(VrSettingsStore.K_ALIGN_LINE, "中心辅助线", Kind.TOGGLE),
         Row("vr_recenter_now", "立即重置中心点", Kind.ACTION),
         Row("vr_exit", "退出 VR", Kind.ACTION),
     )
@@ -50,6 +54,9 @@ object VrQuickPanel {
         VrSettingsStore.K_DEAD_ZONE -> settings.gamepadDeadZone
         VrSettingsStore.K_REPEAT -> settings.menuRepeatMs.toFloat()
         VrSettingsStore.K_RECENTER -> if (settings.recenterOnEnter) 1f else 0f
+        VrSettingsStore.K_ZOOM -> settings.zoomScale
+        VrSettingsStore.K_V_FLIP -> if (settings.verticalFlip) 1f else 0f
+        VrSettingsStore.K_ALIGN_LINE -> if (settings.showCenterAlignmentLine) 1f else 0f
         else -> 0f
     }
 
@@ -74,6 +81,9 @@ object VrQuickPanel {
             VrSettingsStore.K_DEAD_ZONE -> settings.copy(gamepadDeadZone = v)
             VrSettingsStore.K_REPEAT -> settings.copy(menuRepeatMs = v.toLong())
             VrSettingsStore.K_RECENTER -> settings.copy(recenterOnEnter = v >= 0.5f)
+            VrSettingsStore.K_ZOOM -> settings.copy(zoomScale = v)
+            VrSettingsStore.K_V_FLIP -> settings.copy(verticalFlip = v >= 0.5f)
+            VrSettingsStore.K_ALIGN_LINE -> settings.copy(showCenterAlignmentLine = v >= 0.5f)
             else -> settings
         }.sanitized()
     }
@@ -84,11 +94,19 @@ object VrQuickPanel {
         Kind.RANGE -> row.format(valueOf(settings, row.key))
     }
 
-    /** Selection window so a growing row list never gets clipped. Pure, stateless. */
+    /**
+     * Stateless scroll window (OpenNOW-VR P-F1). The selected row is always
+     * inside, and the window only slides once the selection passes its edge.
+     * No persisted scroll offset, so page changes / process restarts cannot
+     * leave the menu pointing at the wrong block of rows.
+     */
     fun visibleWindowFor(selected: Int, visibleRows: Int = VISIBLE_ROWS): IntRange {
-        val count = visibleRows.coerceIn(1, rows.size)
-        val first = (selected - count + 1).coerceIn(0, rows.size - count)
-        return first until first + count
+        require(visibleRows > 0) { "visibleRows must be positive" }
+        val rowsShown = visibleRows.coerceIn(1, rows.size)
+        val selectedRow = selected.coerceIn(0, rows.lastIndex)
+        val maxStart = (rows.size - rowsShown).coerceAtLeast(0)
+        val start = (selectedRow - (rowsShown - 1)).coerceIn(0, maxStart)
+        return start until start + rowsShown
     }
 
     fun adjust(row: Row, settings: VrSettings, steps: Int): VrSettings {

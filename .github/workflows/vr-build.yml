@@ -112,11 +112,29 @@ jobs:
           # Float settings are milli-units; every SeekBar entry needs divisor=1000.
           for key in ('vr_screen_scale', 'vr_screen_distance', 'vr_brightness',
                       'vr_curvature', 'vr_head_sensitivity', 'vr_ipd_scale',
-                      'vr_gamepad_dead_zone'):
+                      'vr_gamepad_dead_zone', 'vr_zoom_scale'):
               block = re.search(r'<com\.limelight\.preferences\.SeekBarPreference\s[^>]*android:key="%s"[^>]*/>' % key,
                                 prefs, re.S)
               if not block or 'seekbar:divisor="1000"' not in block.group(0):
                   sys.exit('FAIL: %s is missing the milli-unit divisor' % key)
+          renderer = (root / 'app/src/main/java/com/limelight/vr/VrTheaterRenderer.kt').read_text(encoding='utf-8')
+          # P-D3: post-process zoom must run in onFinishFrame, never onDrawEye.
+          if 'drawZoomFill(viewport' not in renderer or 'override fun onFinishFrame' not in renderer:
+              sys.exit('FAIL: onFinishFrame zoom-fill post-process is missing')
+          eye_body = renderer.split('override fun onDrawEye', 1)[1].split('private fun drawQuad', 1)[0]
+          if 'glClear(' in eye_body:
+              sys.exit('FAIL: glClear() must NOT be called inside onDrawEye (P-B1)')
+          hooks = (root / 'app/src/main/java/com/limelight/vr/VrActivityHooks.kt').read_text(encoding='utf-8')
+          if 'VrSession.enabled) return true' not in hooks:
+              sys.exit('FAIL: touch isolation while VR is on is missing (P-E1)')
+          session = (root / 'app/src/main/java/com/limelight/vr/VrSession.kt').read_text(encoding='utf-8')
+          if '!enabled || VrGamepadRouter.isGamepad' not in session:
+              sys.exit('FAIL: source gate while VR is on is still present (P-E8)')
+          if 'SCREEN_ORIENTATION_SENSOR_LANDSCAPE' not in session:
+              sys.exit('FAIL: VR landscape/fullscreen enforcement missing (P-D9)')
+          pcview = (root / 'app/src/main/java/com/limelight/PcView.kt').read_text(encoding='utf-8')
+          if 'Gravity.CENTER_HORIZONTAL or android.view.Gravity.BOTTOM' not in pcview:
+              sys.exit('FAIL: VR entry button is not centred (P-F2 regression)')
           print('VR wiring guards passed (%d keys reconciled)' % len(keys))
           PY
 

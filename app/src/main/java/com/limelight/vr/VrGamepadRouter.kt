@@ -55,7 +55,10 @@ class VrGamepadRouter {
     /** Restarts the stick repeat cadence when edit mode changes. */
     fun resetAxisHold() {
         lastAxisMs = Long.MIN_VALUE
-        lastHatY = 0f
+        // P-E7: deliberately DO NOT clear lastHatY. It records the physical
+        // edge state of a still-held D-pad; zeroing it makes the next motion
+        // event fire a second MoveSelection, so pressing A while holding the
+        // D-pad skips a row.
         navAxisMs = Long.MIN_VALUE
         navHatY = 0f
         pendingNavDirection = 0
@@ -81,12 +84,21 @@ class VrGamepadRouter {
         }
         if (action != VrKeys.ACTION_DOWN) return Command.PassThrough
         val wasMenuActive = menuHoldActive()
-        pressed.add(keyCode)
+        val comboBefore = comboPressed()
+        val alreadyDown = !pressed.add(keyCode)
+        val comboNow = comboPressed()
 
-        // L1+R1 enters VR from anywhere in the app; entry-only, never exits.
-        if (comboPressed() && !comboFired) {
-            comboFired = true
-            if (!vrEnabled) return Command.ToggleVr
+        // P-E5: L1+R1 must fire ONLY on the edge where the combination BECOMES
+        // held, and only when a shoulder key is the key just pressed. A plain
+        // level check lets stale held shoulders (e.g. after menu paging) or
+        // their own OS key-repeat re-trigger and kick the user out of VR.
+        if (!panelOpen && comboNow) {
+            val shoulderDown = keyCode == VrKeys.BUTTON_L1 || keyCode == VrKeys.BUTTON_R1
+            if (!comboBefore && shoulderDown && !alreadyDown && !comboFired) {
+                comboFired = true
+                if (!vrEnabled) return Command.ToggleVr
+            }
+            if (alreadyDown || comboFired) return Command.Consumed
         }
         if (!vrEnabled) return Command.PassThrough
 
