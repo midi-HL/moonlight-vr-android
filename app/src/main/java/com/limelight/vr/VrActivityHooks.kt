@@ -35,8 +35,12 @@ class VrActivityHooks(private val activity: Activity, private val delegate: Wind
         // P-E1: with the GL layer promoted on top, the 2D UI is invisible but
         // still focusable/touchable. A stray tap inside the headset used to open
         // a hidden dialog and steal input. Swallow the whole gesture while VR is
-        // on; the VR panel and 2D screens are fully gamepad-driven.
-        if (VrSession.enabled) return true
+        // on. P-E10 exception: a genuine short tap (no drag, no long press)
+        // recentres the view, so the user need not take the headset off.
+        if (VrSession.enabled) {
+            VrSession.onVrTap(event)
+            return true
+        }
         return delegate.dispatchTouchEvent(event)
     }
 

@@ -103,6 +103,33 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     fun toggle(context: Context) = setEnabled(context, !enabled)
 
+    // P-E10: short-tap recentre state. Touch events are otherwise swallowed by
+    // VrActivityHooks so the hidden 2D UI can never steal focus.
+    private var tapDownX = 0f
+    private var tapDownY = 0f
+    private var tapCancelled = false
+
+    fun onVrTap(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                tapDownX = event.x
+                tapDownY = event.y
+                tapCancelled = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (Math.abs(event.x - tapDownX) > 24f || Math.abs(event.y - tapDownY) > 24f) {
+                    tapCancelled = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val quick = event.eventTime - event.downTime <= 400L
+                if (!tapCancelled && quick) onRecenter?.invoke()
+                tapCancelled = false
+            }
+            MotionEvent.ACTION_CANCEL -> tapCancelled = true
+        }
+    }
+
     fun setPanelOpen(value: Boolean) {
         if (panelOpen == value) return
         panelOpen = value

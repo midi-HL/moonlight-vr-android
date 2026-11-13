@@ -125,8 +125,11 @@ jobs:
           if 'glClear(' in eye_body:
               sys.exit('FAIL: glClear() must NOT be called inside onDrawEye (P-B1)')
           hooks = (root / 'app/src/main/java/com/limelight/vr/VrActivityHooks.kt').read_text(encoding='utf-8')
-          if 'VrSession.enabled) return true' not in hooks:
-              sys.exit('FAIL: touch isolation while VR is on is missing (P-E1)')
+          if 'VrSession.onVrTap(event)' not in hooks or 'return true' not in hooks:
+              sys.exit('FAIL: touch isolation + short-tap recentre missing (P-E1/E10)')
+          session_tap = (root / 'app/src/main/java/com/limelight/vr/VrSession.kt').read_text(encoding='utf-8')
+          if 'fun onVrTap(' not in session_tap or 'ACTION_CANCEL' not in session_tap:
+              sys.exit('FAIL: short-tap recentre state machine is incomplete (P-E10)')
           session = (root / 'app/src/main/java/com/limelight/vr/VrSession.kt').read_text(encoding='utf-8')
           if '!enabled || VrGamepadRouter.isGamepad' not in session:
               sys.exit('FAIL: source gate while VR is on is still present (P-E8)')
