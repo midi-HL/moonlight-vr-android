@@ -1616,6 +1616,7 @@
     <string name="toast_super_command_error">Не удалось отправить суперкоманду: %s</string>
     <string name="toast_install_permission_denied">Нет разрешения на установку, загрузка отменена</string>
     <string name="toast_check_update_failed">Не удалось проверить обновления. Повторите позже</string>
+    <string name="toast_vr_review_updates_disabled">Для обновления тестовой VR-сборки используйте предоставленный APK.</string>
     <string name="toast_already_latest_version">Уже установлена последняя версия v%s</string>
     <string name="update_already_latest_title">Обновлений нет</string>
     <string name="update_btn_got_it">Понятно</string>

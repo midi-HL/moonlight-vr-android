@@ -6,22 +6,23 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.Build
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.limelight.PcView
+import com.limelight.R
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class VrRuntimeTest {
@@ -44,6 +45,7 @@ class VrRuntimeTest {
                         assertEquals("Outside padding must remain transparent", 0, bitmap.getPixel(0, 0))
                         assertTrue("Controls must be opaque and visible", bitmap.getPixel(width / 2, height / 2) ushr 24 > 240)
                         if (width == 1024 && row in listOf(0, 4, 12, 15)) save(bitmap, "panel-$language-$row.png")
+                        if (width == 640 && row in listOf(0, 15)) save(bitmap, "panel-$language-$row-640.png")
                     }
                     bitmap.recycle()
                 }
@@ -56,6 +58,7 @@ class VrRuntimeTest {
         instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
         val launch = Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val scenario = ActivityScenario.launch<PcView>(launch)
+        var dialog: AlertDialog? = null
         try {
             scenario.onActivity { activity ->
                 assertTrue("Device must support the bundled Cardboard runtime", VrSession.isSupported())
@@ -72,14 +75,24 @@ class VrRuntimeTest {
                 VrSession.setSelectedIndex(1)
                 assertTrue(VrSession.panelOpen)
                 VrSession.setPanelOpen(false)
-                val dialog = AlertDialog.Builder(activity).setTitle("VR dialog test")
+                val openedDialog = AlertDialog.Builder(activity).setTitle("VR dialog test")
                     .setMessage("Keep this dialog in both eyes")
                     .setPositiveButton(android.R.string.ok, null).create()
-                dialog.show()
-                VrSession.registerDialog(dialog)
-                assertTrue(VrSession.activeDialogDecors(decor).contains(dialog.window!!.decorView))
-                assertTrue(dialog.window!!.callback is VrActivityHooks)
-                dialog.dismiss()
+                dialog = openedDialog
+                openedDialog.show()
+                VrSession.registerDialog(openedDialog)
+            }
+            waitForUiCondition("Dialog did not attach and complete its first layout") {
+                val root = dialog?.window?.decorView
+                dialog?.isShowing == true && root != null && root.isAttachedToWindow && root.isLaidOut
+            }
+            scenario.onActivity { activity ->
+                val openedDialog = requireNotNull(dialog)
+                val decor = activity.window.decorView
+                assertTrue(VrSession.activeDialogDecors(decor).contains(openedDialog.window!!.decorView))
+                assertTrue(openedDialog.window!!.callback is VrActivityHooks)
+                openedDialog.dismiss()
+                dialog = null
                 VrSession.setEnabled(activity, false)
                 assertFalse(VrSession.enabled)
                 assertEquals(0, countTheaters(decor))
@@ -90,7 +103,10 @@ class VrRuntimeTest {
                 assertEquals(0, countTheaters(activity.window.decorView))
             }
         } finally {
-            instrumentation.runOnMainSync { VrSession.updateSettings(context, original) }
+            instrumentation.runOnMainSync {
+                dialog?.dismiss()
+                VrSession.updateSettings(context, original)
+            }
             scenario.close()
         }
     }
@@ -113,6 +129,50 @@ class VrRuntimeTest {
         }
     }
 
+    @Test fun pcViewRootRebuildPreservesImmersiveVrWindow() {
+        val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
+        val scenario = ActivityScenario.launch<PcView>(Intent(context, PcView::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        var owner: PcView? = null
+        @Suppress("DEPRECATION")
+        val immersiveMask = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        fun settled(): Boolean {
+            val activity = owner ?: return false
+            val decor = activity.window.decorView
+            @Suppress("DEPRECATION")
+            val flagsPresent = decor.systemUiVisibility and immersiveMask == immersiveMask
+            val barsHidden = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val insets = decor.rootWindowInsets
+                insets != null && !insets.isVisible(WindowInsets.Type.statusBars()) &&
+                    !insets.isVisible(WindowInsets.Type.navigationBars())
+            } else true
+            return VrSession.enabled && activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                decor.isAttachedToWindow && decor.isLaidOut && flagsPresent && barsHidden
+        }
+        try {
+            scenario.onActivity { activity ->
+                owner = activity
+                assertTrue("Device must support the bundled Cardboard runtime", VrSession.isSupported())
+                VrSession.setEnabled(activity, true)
+            }
+            waitForUiCondition("VR did not settle into a landscape immersive window", condition = ::settled)
+            scenario.onActivity { activity ->
+                val originalRoot = activity.findViewById<View>(R.id.pcViewRootLayout)
+                assertNotNull(originalRoot)
+                // Exercise the actual PcView -> initializeViews -> UiHelper 2D flag reset path.
+                activity.onConfigurationChanged(Configuration(activity.resources.configuration))
+                assertNotSame("PcView must really rebuild its normal root", originalRoot,
+                    activity.findViewById<View>(R.id.pcViewRootLayout))
+            }
+            waitForUiCondition("PcView root rebuild discarded VR immersive bars", condition = ::settled)
+        } finally {
+            instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
+            scenario.close()
+        }
+    }
+
     @Test fun quickControlsRenderInBothEyesAtExtremeSceneSettings() {
         val original = VrSession.settings
         instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
@@ -127,16 +187,19 @@ class VrRuntimeTest {
                 VrSession.setPanelOpen(true)
                 VrSession.setSelectedIndex(2)
             }
-            val complete = CountDownLatch(1)
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            val deadline = SystemClock.uptimeMillis() + 15000L
+            val deadline = SystemClock.uptimeMillis() + 45000L
             var visibleInBothEyes = false
-            val frameCheck = object : Runnable {
-                override fun run() {
+            var lastFrame: Bitmap? = null
+            try {
+                // UiAutomation screenshot synchronizes with the window manager. Keep it on the
+                // instrumentation thread so the main thread can finish layout/rotation/GL startup.
+                while (SystemClock.uptimeMillis() < deadline && !visibleInBothEyes) {
                     val captured = instrumentation.uiAutomation.takeScreenshot()
                     val frame = captured?.copy(Bitmap.Config.ARGB_8888, false)
                     captured?.recycle()
                     if (frame != null) {
+                        lastFrame?.recycle()
+                        lastFrame = frame
                         var left = 0
                         var right = 0
                         for (y in 0 until frame.height step 2) for (x in 0 until frame.width step 2) {
@@ -149,26 +212,36 @@ class VrRuntimeTest {
                             }
                         }
                         visibleInBothEyes = frame.width > frame.height && left > 20 && right > 20
-                        if (visibleInBothEyes || SystemClock.uptimeMillis() >= deadline) {
-                            save(frame, "stereo-controls-extreme-scene.png")
-                            frame.recycle()
-                            complete.countDown()
-                            return
-                        }
+                    }
+                    if (!visibleInBothEyes) SystemClock.sleep(200L)
+                }
+            } finally {
+                lastFrame?.let { frame ->
+                    try {
+                        // Keep the final failure frame as well as the success frame for diagnosis.
+                        save(frame, "stereo-controls-extreme-scene.png")
+                    } finally {
                         frame.recycle()
                     }
-                    if (SystemClock.uptimeMillis() >= deadline) complete.countDown()
-                    else handler.postDelayed(this, 200L)
                 }
             }
-            handler.post(frameCheck)
-            assertTrue("Timed out waiting for a rendered stereo frame", complete.await(20, TimeUnit.SECONDS))
-            handler.removeCallbacks(frameCheck)
             assertTrue("The head-relative controls must stay visible in both eyes", visibleInBothEyes)
         } finally {
             instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
             scenario.close()
         }
+    }
+
+    private fun waitForUiCondition(message: String, timeoutMs: Long = 15000L, condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            var ready = false
+            instrumentation.runOnMainSync { ready = condition() }
+            if (ready) return
+            // Only the test thread waits; the main loop remains free to attach and lay out windows.
+            SystemClock.sleep(50L)
+        }
+        fail(message)
     }
 
     private fun countTheaters(view: View): Int {

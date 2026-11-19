@@ -1686,6 +1686,7 @@
     <string name="toast_super_command_error">发送超级命令时发生错误: %s</string>
     <string name="toast_install_permission_denied">未获得安装权限，下载已取消</string>
     <string name="toast_check_update_failed">检查更新失败，请稍后重试</string>
+    <string name="toast_vr_review_updates_disabled">VR 审查版请使用交付的 APK 更新。</string>
     <string name="toast_already_latest_version">已是最新版本 v%s</string>
     <string name="update_already_latest_title">已是最新版本</string>
     <string name="update_btn_got_it">知道了</string>

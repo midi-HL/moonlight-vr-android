@@ -72,6 +72,8 @@ android {
         // then set githubOAuthClientId in local.properties, pass -PgithubOAuthClientId=...,
         // or set GITHUB_OAUTH_CLIENT_ID in the environment.
         buildConfigField "String", "GITHUB_OAUTH_CLIENT_ID", "\"${escapeBuildConfigString(githubOAuthClientId)}\""
+        // The review APK must not offer non-VR upstream releases as its own updates.
+        buildConfigField "boolean", "UPSTREAM_UPDATES_ENABLED", (!vrReviewBuild).toString()
 
         externalNativeBuild {
             ndkBuild {

@@ -143,3 +143,17 @@
     public int getCrownProfilesFailed();
     public int getPairingItemsFailed();
 }
+
+# VR orientation instrumentation calls this precise ABI across the target/test APK boundary.
+# Production callers alone do not keep a getter that only the instrumentation APK reads.
+-keep class com.limelight.OrientationManager {
+    public <init>(android.app.Activity, int, int, boolean, boolean, kotlin.jvm.functions.Function0);
+    public boolean isServerInitiatedRotation();
+    public void setConnected(boolean);
+    public void setPreferredOrientation();
+    public void onConfigurationChanged();
+    public void onServerResolutionChanged(boolean);
+    public void syncOrientationOnFirstFrame(int, int);
+    public void reset();
+    public void cleanup();
+}

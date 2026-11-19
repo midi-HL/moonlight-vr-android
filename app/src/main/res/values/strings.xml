@@ -1985,6 +1985,7 @@ Tap again to replace it.</string>
     <string name="toast_super_command_error">Couldn\'t send super command: %s</string>
     <string name="toast_install_permission_denied">Install permission denied, download cancelled</string>
     <string name="toast_check_update_failed">Failed to check for updates, please try later</string>
+    <string name="toast_vr_review_updates_disabled">Use the provided APK to update this VR review build.</string>
     <string name="toast_already_latest_version">Already on latest version v%s</string>
     <string name="update_already_latest_title">Already Up to Date</string>
     <string name="update_btn_got_it">Got it</string>

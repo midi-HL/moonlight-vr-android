@@ -97,6 +97,7 @@ class VrActivityHooks(
     override fun onContentChanged() {
         delegate.onContentChanged()
         VrSession.onWindowDirty?.invoke()
+        if (!inDialog) VrSession.onHostContentChanged(activity)
     }
 
     override fun onProvideKeyboardShortcuts(

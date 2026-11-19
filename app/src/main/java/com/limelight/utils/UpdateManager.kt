@@ -30,6 +30,7 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.os.ConfigurationCompat
 
+import com.limelight.BuildConfig
 import com.limelight.R
 import com.limelight.handbook.HandbookLauncher
 
@@ -109,6 +110,12 @@ object UpdateManager {
         showToast: Boolean,
         enforceStartupInterval: Boolean
     ) {
+        if (!BuildConfig.UPSTREAM_UPDATES_ENABLED) {
+            if (showToast) {
+                Toast.makeText(context, R.string.toast_vr_review_updates_disabled, Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
         if (isChecking.getAndSet(true)) {
             // 连点防抖：手动检查时反馈 toast，避免用户以为点了没反应
             if (showToast) {
@@ -144,6 +151,10 @@ object UpdateManager {
      * 如果之前有暂存的更新信息且权限已授予，则自动开始下载。
      */
     fun onInstallPermissionResult(context: Context) {
+        if (!BuildConfig.UPSTREAM_UPDATES_ENABLED) {
+            pendingUpdateInfo = null
+            return
+        }
         if (pendingUpdateInfo != null && canInstallApk(context)) {
             val info = pendingUpdateInfo
             pendingUpdateInfo = null
@@ -163,6 +174,11 @@ object UpdateManager {
         completedDownloadId: Long,
         onFinished: (() -> Unit)? = null
     ) {
+        if (!BuildConfig.UPSTREAM_UPDATES_ENABLED) {
+            // DownloadManager can finish an update queued by an older review APK.
+            onFinished?.invoke()
+            return
+        }
         val appContext = context.applicationContext
         val completion = synchronized(downloadCompletionLock) {
             val prefs = appContext.getSharedPreferences("update_prefs", Context.MODE_PRIVATE)
@@ -719,6 +735,7 @@ object UpdateManager {
     // ------------------------------------------------------------------
 
     private fun startDirectDownload(context: Context, info: UpdateInfo) {
+        if (!BuildConfig.UPSTREAM_UPDATES_ENABLED) return
         try {
             val fileName = info.apkName ?: ("moonlight-" + info.version + ".apk")
             val downloadCandidates = info.downloadUrls
@@ -921,6 +938,7 @@ object UpdateManager {
     // ------------------------------------------------------------------
 
     private fun installApk(context: Context, downloadId: Long) {
+        if (!BuildConfig.UPSTREAM_UPDATES_ENABLED) return
         try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
 

@@ -551,6 +551,7 @@
     <string name="sponsor_open_wechat">開啟微信</string>
     <string name="sponsor_wechat_not_installed">尚未安裝微信</string>
     <string name="toast_update_integrity_mismatch">更新下載內容不是有效安裝包，請切換網路或使用瀏覽器下載。</string>
+    <string name="toast_vr_review_updates_disabled">VR 審查版請使用交付的 APK 更新。</string>
     <string name="wheel_alignment_title">對齊方式</string>
     <string name="wheel_alignment_center">分區中線朝上</string>
     <string name="wheel_alignment_edge">分區邊線朝上</string>

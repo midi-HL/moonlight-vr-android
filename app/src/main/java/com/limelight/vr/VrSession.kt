@@ -501,6 +501,22 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         onWindowDirty?.invoke()
     }
 
+    /** Host root rebuilding may restore its normal 2D system-bar flags after setContentView. */
+    internal fun onHostContentChanged(activity: Activity) {
+        if (!enabled || activeActivity !== activity) return
+        val host = activeHost ?: return
+        val window = activity.window ?: return
+        val decor = window.decorView
+        decor.post {
+            // An old post must never reopen VR or change a paused/replaced window.
+            if (enabled && activeActivity === activity && activeHost === host &&
+                activity.window === window && window.decorView === decor &&
+                decor.isAttachedToWindow && !activity.isFinishing && !activity.isDestroyed) {
+                applyImmersive(activity)
+            }
+        }
+    }
+
     private fun releaseActiveHost() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             systemBackRegistration?.unregister()
