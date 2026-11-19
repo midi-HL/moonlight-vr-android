@@ -83,14 +83,19 @@ class VrVideoOrientationRuntimeTest {
             assertNotNull("Production renderer did not install its video SurfaceTexture", output)
             codec = decodeFixture(requireNotNull(output))
             val upright = awaitPixels("video-default-upright.png") { it.upright(false) }
-            scenario.onActivity { VrSession.updateSettings(it, VrSession.settings.copy(zoomScale = 1.35f)) }
+            val zoomScale = 1.35f
+            scenario.onActivity { VrSession.updateSettings(it, VrSession.settings.copy(zoomScale = zoomScale)) }
             val zoomed = awaitPixels("video-zoom-135-upright.png") { frame ->
-                frame.upright(false) && frame.eyes.indices.all {
-                    frame.separation(it) > upright.separation(it) * 1.1
-                } && frame.eyes.indices.all { eye ->
-                    val originalCenter = upright.eyes[eye].map { it.x }.average()
-                    val zoomedCenter = frame.eyes[eye].map { it.x }.average()
-                    abs(originalCenter - zoomedCenter) < upright.separation(eye) * 0.05
+                frame.upright(false) && frame.width == upright.width && frame.eyes.indices.all { eye ->
+                    val split = frame.width / 2
+                    val anchor = if (eye == 0) split / 2.0 else (split + frame.width) / 2.0
+                    val tolerance = max(4.0, upright.separation(eye) * 0.05)
+                    // The lens profile can place the image off center before zoom. Scale that offset
+                    // about the corresponding eye's viewport center, not the full-screen midpoint.
+                    frame.eyes[eye].indices.all { color ->
+                        val expectedX = anchor + (upright.eyes[eye][color].x - anchor) * zoomScale
+                        abs(frame.eyes[eye][color].x - expectedX) < tolerance
+                    }
                 }
             }
             scenario.onActivity { VrSession.updateSettings(it, VrSession.settings.copy(
@@ -177,7 +182,7 @@ class VrVideoOrientationRuntimeTest {
     }
 
     private data class Cloud(val count: Int, val x: Double, val y: Double)
-    private data class Stereo(val eyes: List<List<Cloud>>, val landscape: Boolean) {
+    private data class Stereo(val eyes: List<List<Cloud>>, val width: Int, val landscape: Boolean) {
         fun upright(flipped: Boolean): Boolean = landscape && eyes.all { c ->
             c.all { it.count > 20 } && c[0].x + 3 < c[1].x && c[2].x + 3 < c[3].x &&
                 if (flipped) c[2].y + 3 < c[0].y && c[3].y + 3 < c[1].y
@@ -207,7 +212,7 @@ class VrVideoOrientationRuntimeTest {
         }
         return Stereo((0..1).map { e -> (0..3).map { c ->
             Cloud(count[e][c], sx[e][c] / maxOf(1, count[e][c]), sy[e][c] / maxOf(1, count[e][c]))
-        } }, bitmap.width > bitmap.height)
+        } }, bitmap.width, bitmap.width > bitmap.height)
     }
 
     private fun awaitPixels(name: String, matches: (Stereo) -> Boolean): Stereo {
