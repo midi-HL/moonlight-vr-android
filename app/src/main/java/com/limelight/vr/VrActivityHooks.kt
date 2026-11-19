@@ -1,6 +1,7 @@
 package com.limelight.vr
 
 import android.app.Activity
+import android.os.Build
 import android.view.ActionMode
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
@@ -78,7 +79,8 @@ class VrActivityHooks(
 
     @Suppress("DEPRECATION")
     override fun onWindowStartingActionMode(callback: ActionMode.Callback, type: Int): ActionMode? =
-        delegate.onWindowStartingActionMode(callback, type)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) delegate.onWindowStartingActionMode(callback, type)
+        else delegate.onWindowStartingActionMode(callback)
 
     override fun onActionModeStarted(mode: ActionMode) = delegate.onActionModeStarted(mode)
     override fun onActionModeFinished(mode: ActionMode) = delegate.onActionModeFinished(mode)
@@ -101,12 +103,15 @@ class VrActivityHooks(
         data: MutableList<KeyboardShortcutGroup>?,
         menu: Menu?,
         deviceId: Int,
-    ) = delegate.onProvideKeyboardShortcuts(data, menu, deviceId)
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) delegate.onProvideKeyboardShortcuts(data, menu, deviceId)
+    }
 
     @Suppress("DEPRECATION")
     override fun onSearchRequested(): Boolean = delegate.onSearchRequested()
 
     @Suppress("DEPRECATION")
     override fun onSearchRequested(searchEvent: SearchEvent?): Boolean =
-        delegate.onSearchRequested(searchEvent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) delegate.onSearchRequested(searchEvent)
+        else delegate.onSearchRequested()
 }

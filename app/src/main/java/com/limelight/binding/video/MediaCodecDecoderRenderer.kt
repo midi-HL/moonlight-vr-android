@@ -657,6 +657,10 @@ class MediaCodecDecoderRenderer(
 
             val startMs = SystemClock.uptimeMillis()
             try {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                    framegenOutputSwitchPending = false
+                    return@Runnable
+                }
                 applyHdrDataSpace(targetSurface, "framegen capture")
                 decoder.setOutputSurface(targetSurface)
                 framegenOutputSwitchPending = false
@@ -1257,9 +1261,12 @@ class MediaCodecDecoderRenderer(
         selectedDecoderInfo: MediaCodecInfo,
         format: MediaFormat,
         throwOnCodecError: Boolean
-    ): Boolean {
+    ): Boolean = synchronized(codecRecoveryMonitor) {
         var configured = false
         dolbyVisionRoutingActive = false
+        // A previous failed attempt may have stored its format before start() rejected it.
+        // Keep creation and configuration atomic with VR output switching.
+        configuredFormat = null
         try {
             videoDecoder = MediaCodec.createByCodecName(selectedDecoderInfo.name)
 

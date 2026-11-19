@@ -585,7 +585,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
         // Android 8.0 rejects orientation requests from floating or translucent Activities.
         // Multi-window hosts already follow the display orientation.
-        if (!activity.isInMultiWindowMode && !activity.hasFloatingOrTranslucentWindow()) {
+        if ((Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !activity.isInMultiWindowMode) &&
+            !activity.hasFloatingOrTranslucentWindow()) {
             val state = windowStates.getValue(activity)
             if (state.orientation == null) {
                 windowStates[activity] = state.copy(orientation = activity.requestedOrientation)
@@ -641,11 +642,10 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun Activity.hasFloatingOrTranslucentWindow(): Boolean {
-        val flags = obtainStyledAttributes(intArrayOf(android.R.attr.windowIsFloating, android.R.attr.windowIsTranslucent))
-        return try {
-            flags.getBoolean(0, false) || flags.getBoolean(1, false)
-        } finally {
-            flags.recycle()
+        val value = android.util.TypedValue()
+        return intArrayOf(android.R.attr.windowIsFloating, android.R.attr.windowIsTranslucent).any { attribute ->
+            theme.resolveAttribute(attribute, value, true) &&
+                value.type == android.util.TypedValue.TYPE_INT_BOOLEAN && value.data != 0
         }
     }
 }
