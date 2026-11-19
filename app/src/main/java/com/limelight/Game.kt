@@ -316,6 +316,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     private var framegenInputHdrEnabled = false
     /** Final HDR decision after display and decoder capability negotiation. */
     private var negotiatedHdrEnabled = false
+    private var vrPresentationPrepared = false
     private var framegenEnabledToastShown = false
     private var pyrowaveFallbackDialogShown = false
     private var reportedCrash = false
@@ -813,7 +814,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             !negotiatedHdrEnabled && framegenCapture == null &&
                 externalDisplayManager?.isUsingExternalDisplay() != true &&
                 decoderRenderer?.getActiveVideoFormat() != MoonBridge.VIDEO_FORMAT_PYROWAVE &&
-                (connected || prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE)
+                (vrPresentationPrepared || connected || prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE)
             )
 
     private fun defaultPreferences(): SharedPreferences =
@@ -953,6 +954,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     ): StreamConfigResult {
         val glPrefs = GlPreferences.readPreferences(this)
         val vrPlayback = com.limelight.vr.VrSession.enabled
+        vrPresentationPrepared = vrPlayback
         val forcePyrowave = !vrPlayback &&
             prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_PYROWAVE
         // PyroWave consumes HDR10+/Dolby Vision frame metadata in its Vulkan
@@ -1989,8 +1991,8 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
     internal fun hasNativeGameMenu(): Boolean = activeGameMenu?.isShowing() == true
 
-    internal fun onVrPanelOpened() {
-        if (!hasNativeGameMenu() && ::controllerHandler.isInitialized) controllerHandler.onVrPanelOpened()
+    internal fun onVrPanelChanged(open: Boolean) {
+        if (::controllerHandler.isInitialized) controllerHandler.onVrPanelChanged(open)
     }
 
     private fun updateKeyboardInterception() {

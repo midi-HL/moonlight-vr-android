@@ -39,6 +39,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     @Volatile private var app: Application? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val router = VrGamepadRouter()
+    private val driverSnapshots = VrDriverSnapshotRouter()
     @Volatile private var activeActivity: Activity? = null
     private var activeHost: VrOverlayHost? = null
     private var systemBackRegistration: SystemBackRegistration? = null
@@ -168,13 +169,20 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         editing = false
         router.editing = false
         router.resetAxisHold()
-        if (value) (activeActivity as? com.limelight.Game)?.onVrPanelOpened()
+        if (value) driverSnapshots.beginCapture()
+        (activeActivity as? com.limelight.Game)?.onVrPanelChanged(value)
         if (!value) selectedIndex = 0
         refreshHosts()
     }
 
     fun setSelectedIndex(index: Int) {
-        selectedIndex = index.coerceIn(0, VrQuickPanel.rows.lastIndex)
+        val nextIndex = index.coerceIn(0, VrQuickPanel.rows.lastIndex)
+        if (nextIndex != selectedIndex) {
+            editing = false
+            router.editing = false
+            router.resetAxisHold()
+        }
+        selectedIndex = nextIndex
         refreshHosts()
     }
 
@@ -221,6 +229,38 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         router.onUiNavigation(x, y, hatX, hatY, timeMs)
 
     fun drainNavDirection(): Int = router.drainNavDirection()
+
+    /** Must run on main; raw-driver and Android-key events share one ordered input state. */
+    internal fun onDriverSnapshot(
+        activity: Activity,
+        sourceId: Int,
+        buttons: Int,
+        leftX: Float, leftY: Float,
+        rightX: Float, rightY: Float,
+        leftTrigger: Float, rightTrigger: Float,
+        timeMs: Long,
+    ): VrDriverSnapshotRouter.Result {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (activeActivity !== activity) return VrDriverSnapshotRouter.Result(buttons, captured = false)
+        val result = driverSnapshots.update(sourceId, buttons, leftX, leftY, rightX, rightY,
+            leftTrigger, rightTrigger, timeMs, settings.gamepadDeadZone, settings.menuRepeatMs,
+            panelOpen = { panelOpen },
+            onKey = { key, action, repeated ->
+                handle(router.onKey(key, action, true, sourceId, repeated))
+            })
+        if (enabled && panelOpen && buttons and VrDriverSnapshotRouter.DIRECTION_MASK == 0) {
+            handle(router.onAxis(leftX, leftY, timeMs))
+        }
+        return result
+    }
+
+    internal fun onDriverDisconnected(sourceId: Int) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { onDriverDisconnected(sourceId) }
+            return
+        }
+        driverSnapshots.forget(sourceId) { key -> handle(router.onKey(key, VrKeys.ACTION_UP, true, sourceId)) }
+    }
 
     private data class DialogWindow(val owner: WeakReference<Activity>, val decor: WeakReference<View>)
     private val dialogDecors = ArrayList<DialogWindow>()
@@ -289,7 +329,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
                 true
             }
             VrGamepadRouter.Command.ClosePanel -> {
-                setPanelOpen(false)
+                if (editing) setEditing(false) else setPanelOpen(false)
                 true
             }
             VrGamepadRouter.Command.Confirm -> {
@@ -405,6 +445,14 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     override fun onActivityResumed(activity: Activity) {
         if (activeActivity !== activity) releaseActiveHost()
         activeActivity = activity
+        // Another screen may have enabled VR while this stream was kept alive in the background.
+        // Recheck the settled Game presentation path before creating its stereo surface.
+        if (enabled && activity is com.limelight.Game && !activity.canEnterVrDuringStream()) {
+            android.widget.Toast.makeText(activity, com.limelight.R.string.vr_restart_stream,
+                android.widget.Toast.LENGTH_LONG).show()
+            updateSettings(activity, settings.copy(enabled = false))
+            return
+        }
         refreshHosts()
     }
 

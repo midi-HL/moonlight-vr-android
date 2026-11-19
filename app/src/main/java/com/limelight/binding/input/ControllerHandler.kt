@@ -51,6 +51,7 @@ import com.limelight.ui.GameGestures
 import com.limelight.ui.GameMenuAxisSourceLifecycle
 import com.limelight.utils.Vector2d
 import com.limelight.utils.CompletionSignal
+import com.limelight.vr.VrSession
 
 import org.cgutman.shieldcontrollerextensions.SceManager
 
@@ -366,6 +367,9 @@ class ControllerHandler(
         private set
     internal val driverControllerContexts = ConcurrentSkipListMap<Int, DriverControllerContext>()
     private val driverControllerContextsLifecycleLock = Any()
+    @Volatile private var vrPanelCapturing = false
+    private val isVrPanelCapturing: Boolean get() = vrPanelCapturing && VrSession.panelOpen
+    private val vrCapturedDriverIds = ConcurrentHashMap<Int, Boolean>()
     // Serializes lights session transfer in migrateContext/close in destroy() (main thread)
     // against session open/requestLights in handleSetControllerLED (common-c callback thread).
     internal val lightsSessionLock = Any()
@@ -1136,6 +1140,8 @@ class ControllerHandler(
         if (startWheelOwnerGate.release(context)) {
             mainThreadHandler.post { gestures.hideStartHoldWheel() }
         }
+        vrCapturedDriverIds.remove(context.id)
+        VrSession.onDriverDisconnected(usbGameMenuAxisSourceId(context.id))
     }
 
     fun disableSensors() {
@@ -2099,10 +2105,11 @@ class ControllerHandler(
     }
 
     internal fun isControllerLocallyCaptured(controllerNumber: Short): Boolean =
-        inputDeviceContextSnapshot.any {
+        isVrPanelCapturing || inputDeviceContextSnapshot.any {
             it.controllerNumber == controllerNumber && it.isLocalInputCaptureActive()
         } || driverControllerContexts.values.any {
-            it.controllerNumber == controllerNumber && it.isLocalInputCaptureActive()
+            it.controllerNumber == controllerNumber &&
+                (it.isLocalInputCaptureActive() || vrCapturedDriverIds.containsKey(it.id))
         }
 
     private fun sendControllerInputPacketLocked(
@@ -3481,11 +3488,14 @@ class ControllerHandler(
         }
     }
 
-    /** Neutralize Android-delivered controller axes when the VR panel takes their motion events. */
-    internal fun onVrPanelOpened() {
+    /** Stop host input before the headset menu takes ownership, including direct USB sources. */
+    internal fun onVrPanelChanged(open: Boolean) {
+        vrPanelCapturing = open
+        if (!open) return
+        val nativeMenuOpen = (activityContext as? com.limelight.Game)?.hasNativeGameMenu() == true
         for (context in inputDeviceContextSnapshot) {
-            if (!isContextUsable(context) || !context.assignedControllerNumber) continue
-            resetSystemStartGesture(context)
+            if (!isContextUsable(context)) continue
+            if (!nativeMenuOpen) resetSystemStartGesture(context)
             context.leftStickX = 0
             context.leftStickY = 0
             context.rightStickX = 0
@@ -3503,7 +3513,26 @@ class ControllerHandler(
                 context.inputMap = context.inputMap and
                     (ControllerPacket.UP_FLAG or ControllerPacket.DOWN_FLAG).inv()
             }
-            sendNeutralControllerState(context)
+            if (context.assignedControllerNumber) sendNeutralControllerState(context)
+        }
+        for (context in driverControllerContexts.values) {
+            if (!isContextUsable(context)) continue
+            if (!nativeMenuOpen) {
+                mainThreadHandler.removeCallbacks(context.shortcutLongPressRunnable)
+                handleDriverShortcutUpdate(context, context.shortcutState.reset())
+            }
+            vrCapturedDriverIds[context.id] = true
+            context.inputMap = 0
+            context.leftStickX = 0
+            context.leftStickY = 0
+            context.rightStickX = 0
+            context.rightStickY = 0
+            context.physRightStickX = 0
+            context.physRightStickY = 0
+            context.leftTrigger = 0
+            context.rightTrigger = 0
+            cancelForwardedDriverTouches(context)
+            if (context.assignedControllerNumber) sendNeutralControllerState(context)
         }
     }
 
@@ -3560,6 +3589,18 @@ class ControllerHandler(
         rightStickX: Float, rightStickY: Float,
         leftTrigger: Float, rightTrigger: Float
     ) {
+        if (Looper.myLooper() != mainThreadHandler.looper) {
+            val sourceContext = driverControllerContexts[controllerId] ?: return
+            mainThreadHandler.post {
+                if (driverControllerContexts[controllerId] === sourceContext && isContextUsable(sourceContext)) {
+                    reportControllerState(controllerId, buttonFlags, leftStickX, leftStickY,
+                        rightStickX, rightStickY, leftTrigger, rightTrigger)
+                }
+            }
+            return
+        }
+        @Suppress("NAME_SHADOWING")
+        var buttonFlags = buttonFlags
         @Suppress("NAME_SHADOWING")
         var leftTrigger = leftTrigger
         @Suppress("NAME_SHADOWING")
@@ -3567,6 +3608,15 @@ class ControllerHandler(
 
         val context = driverControllerContexts[controllerId] ?: return
         if (!isContextUsable(context)) return
+        val vrInput = VrSession.onDriverSnapshot(activityContext, usbGameMenuAxisSourceId(controllerId),
+            buttonFlags, leftStickX, leftStickY, rightStickX, rightStickY,
+            leftTrigger, rightTrigger, SystemClock.uptimeMillis())
+        if (vrInput.captured || isVrPanelCapturing) {
+            vrCapturedDriverIds[controllerId] = true
+            return
+        }
+        vrCapturedDriverIds.remove(controllerId)
+        buttonFlags = vrInput.hostButtons
         val shortcutUpdate = context.shortcutState.onButtonSnapshot(
             buttonFlags,
             android.os.SystemClock.uptimeMillis(),
@@ -3785,7 +3835,8 @@ class ControllerHandler(
         context: DriverControllerContext, motionType: Byte, x: Float, y: Float, z: Float
     ): Boolean {
         if (!isContextUsable(context)) return false
-        if (context.shortcutState.isLocalInputCaptureActive()) return false
+        if (isVrPanelCapturing || vrCapturedDriverIds.containsKey(context.id) ||
+            context.shortcutState.isLocalInputCaptureActive()) return false
 
         // 当启用"陀螺仪模拟右摇杆"或"陀螺仪模拟鼠标"时，拦截陀螺仪数据
         if (motionType == MoonBridge.LI_MOTION_TYPE_GYRO) {
@@ -3858,7 +3909,8 @@ class ControllerHandler(
         val context = driverControllerContexts[controllerId] ?: return
         if (!isContextUsable(context)) return
         if (prefConfig.multiController && !context.assignedControllerNumber) return
-        if (context.shortcutState.isLocalInputCaptureActive()) {
+        if (isVrPanelCapturing || vrCapturedDriverIds.containsKey(context.id) ||
+            context.shortcutState.isLocalInputCaptureActive()) {
             cancelForwardedDriverTouches(context)
             return
         }

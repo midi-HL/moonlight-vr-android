@@ -37,7 +37,7 @@ class VrPanelView(context: Context) : View(context) {
             setBounds(181, 55, 215, 89)
             draw(canvas)
         }
-        line(canvas, context.getString(R.string.vr_panel_title), 244f, 79f, 450f, 35f, foreground, true)
+        line(canvas, context.getString(R.string.vr_panel_title), 244f, 79f, 450f, 35f, primaryText, true)
         val index = selectedIndex.coerceIn(VrQuickPanel.rows.indices)
         val window = VrQuickPanel.visibleWindowFor(index, 6)
         val section = context.getString(sectionLabel(VrQuickPanel.rows[index].key))
@@ -56,7 +56,7 @@ class VrPanelView(context: Context) : View(context) {
             }
             val label = context.getString(rowLabel(row.key))
             val current = VrQuickPanel.valueOf(settings, row.key)
-            val color = if (row.key == "vr_exit") exitAccent else foreground
+            val color = if (row.key == "vr_exit") exitAccent else primaryText
             line(canvas, label, 192f, y + 33f, if (row.kind == VrQuickPanel.Kind.RANGE) 390f else 465f,
                 24f, color, selected)
             when (row.kind) {
@@ -65,7 +65,7 @@ class VrPanelView(context: Context) : View(context) {
                     round(canvas, 594f, y + 21f, 715f, y + 28f, 3.5f, track)
                     if (fraction > 0f) round(canvas, 594f, y + 21f, 594f + fraction * 121f, y + 28f, 3.5f, accent)
                     round(canvas, 731f, y + 7f, 834f, y + 42f, 10f, if (isEditing) accent else chip)
-                    right(canvas, row.format(current), 823f, y + 32f, 20f, if (isEditing) surface else foreground, true)
+                    right(canvas, row.format(current), 823f, y + 32f, 20f, if (isEditing) surface else primaryText, true)
                 }
                 VrQuickPanel.Kind.TOGGLE -> {
                     val on = current >= 0.5f
@@ -154,7 +154,7 @@ class VrPanelView(context: Context) : View(context) {
         val surface = Color.rgb(17, 22, 31)
         val focusFill = Color.rgb(37, 52, 66)
         val editingFill = Color.rgb(38, 61, 67)
-        val foreground = Color.rgb(246, 249, 252)
+        val primaryText = Color.rgb(246, 249, 252)
         val secondary = Color.rgb(181, 198, 214)
         val accent = Color.rgb(142, 235, 211)
         val exitAccent = Color.rgb(255, 191, 185)
