@@ -59,6 +59,9 @@ class VrRuntimeTest {
         val launch = Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val scenario = ActivityScenario.launch<PcView>(launch)
         var dialog: AlertDialog? = null
+        var confirmedFromRealDpad = false
+        var originalDialogAlpha = 1f
+        var originalDialogDim = 0f
         try {
             scenario.onActivity { activity ->
                 assertTrue("Device must support the bundled Cardboard runtime", VrSession.isSupported())
@@ -80,22 +83,45 @@ class VrRuntimeTest {
                     .setPositiveButton(android.R.string.ok, null).create()
                 dialog = openedDialog
                 openedDialog.show()
+                originalDialogAlpha = openedDialog.window!!.attributes.alpha
+                originalDialogDim = openedDialog.window!!.attributes.dimAmount
+                openedDialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                    isFocusableInTouchMode = true
+                    setOnClickListener { confirmedFromRealDpad = true }
+                    requestFocus()
+                }
                 VrSession.registerDialog(openedDialog)
             }
-            waitForUiCondition("Dialog did not attach and complete its first layout") {
+            waitForUiCondition("Projected dialog did not retain a real input-focused window") {
                 val root = dialog?.window?.decorView
-                dialog?.isShowing == true && root != null && root.isAttachedToWindow && root.isLaidOut
+                val alpha = dialog?.window?.attributes?.alpha ?: 0f
+                dialog?.isShowing == true && root != null && root.isAttachedToWindow && root.isLaidOut &&
+                    root.hasWindowFocus() && dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.hasFocus() == true &&
+                    alpha > 0f && alpha <= 0.001f
+            }
+            // Native input injection runs off the UI thread and goes through InputDispatcher,
+            // so a completely transparent NOT_VISIBLE window cannot make this test falsely pass.
+            val time = SystemClock.uptimeMillis()
+            val down = KeyEvent(time, time, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER,
+                0, 0, -1, 0, 0, InputDevice.SOURCE_DPAD)
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(down, true))
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent.changeAction(down, KeyEvent.ACTION_UP), true))
+            waitForUiCondition("A real D-pad key did not reach the projected dialog") {
+                confirmedFromRealDpad && dialog?.isShowing == true && dialog?.window?.decorView?.hasWindowFocus() == true
             }
             scenario.onActivity { activity ->
                 val openedDialog = requireNotNull(dialog)
                 val decor = activity.window.decorView
                 assertTrue(VrSession.activeDialogDecors(decor).contains(openedDialog.window!!.decorView))
                 assertTrue(openedDialog.window!!.callback is VrActivityHooks)
-                openedDialog.dismiss()
-                dialog = null
                 VrSession.setEnabled(activity, false)
                 assertFalse(VrSession.enabled)
                 assertEquals(0, countTheaters(decor))
+                assertTrue("Exit VR before dismissing the native dialog", openedDialog.isShowing)
+                assertEquals(originalDialogAlpha, openedDialog.window!!.attributes.alpha, 0.000001f)
+                assertEquals(originalDialogDim, openedDialog.window!!.attributes.dimAmount, 0.000001f)
+                openedDialog.dismiss()
+                dialog = null
             }
             scenario.recreate()
             scenario.onActivity { activity ->

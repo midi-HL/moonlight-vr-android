@@ -79,4 +79,47 @@ class VrFloatingWindowAlphaTest {
         assertEquals(0.35f, dim.update(0f, hidden = false))
         assertEquals(0f, dim.valueForCapture(0f))
     }
+
+    @Test
+    fun nonzeroHiddenAlphaKeepsInputVisibilityAndOriginalProjectedOpacity() {
+        val floor = 0.0001f
+        val alpha = VrFloatingWindowAlpha(floor)
+        assertEquals(floor, alpha.update(0.8f, hidden = true))
+        assertNull(alpha.update(floor, hidden = true))
+        assertEquals(0.8f, alpha.valueForCapture(floor))
+        assertEquals(0.8f, alpha.update(floor, hidden = false))
+    }
+
+    @Test
+    fun callerOpacityChangesDoNotReplaceNonzeroSentinelWithCapturedSentinel() {
+        val floor = 0.0001f
+        val alpha = VrFloatingWindowAlpha(floor)
+        alpha.update(1f, hidden = true)
+        assertEquals(floor, alpha.update(0.45f, hidden = true))
+        assertNull(alpha.update(floor, hidden = true))
+        assertEquals(0.45f, alpha.valueForCapture(floor))
+        assertEquals(0.45f, alpha.update(floor, hidden = false))
+    }
+
+    @Test
+    fun genuinelyTransparentCallerStillRestoresZeroWithANonzeroHiddenSentinel() {
+        val floor = 0.0001f
+        val alpha = VrFloatingWindowAlpha(floor)
+        assertEquals(floor, alpha.update(0f, hidden = true))
+        assertEquals(0f, alpha.valueForCapture(floor))
+        assertEquals(0f, alpha.update(floor, hidden = false))
+    }
+
+    @Test
+    fun nativeWindowUsesNonzeroInputAlphaWhileDimRemainsCompletelyHidden() {
+        val floor = 0.0001f
+        val alpha = VrFloatingWindowAlpha(floor)
+        val dim = VrFloatingWindowAlpha()
+        assertEquals(floor, alpha.update(1f, hidden = true))
+        assertEquals(0f, dim.update(0.35f, hidden = true))
+        assertEquals(1f, alpha.valueForCapture(floor))
+        assertEquals(0.35f, dim.valueForCapture(0f))
+        assertEquals(1f, alpha.update(floor, hidden = false))
+        assertEquals(0.35f, dim.update(0f, hidden = false))
+    }
 }

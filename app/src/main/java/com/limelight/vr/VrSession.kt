@@ -279,7 +279,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val owner: WeakReference<Activity>,
         val decor: WeakReference<View>,
         val window: WeakReference<Window>?,
-        val alpha: VrFloatingWindowAlpha = VrFloatingWindowAlpha(),
+        // Alpha exactly zero makes Android 15 InputDispatcher reject this focused window as NOT_VISIBLE.
+        val alpha: VrFloatingWindowAlpha = VrFloatingWindowAlpha(0.0001f),
         val dim: VrFloatingWindowAlpha = VrFloatingWindowAlpha(),
     )
     private val dialogDecors = ArrayList<DialogWindow>()
