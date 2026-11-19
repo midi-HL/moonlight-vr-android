@@ -69,8 +69,9 @@ class DiskAssetLoader(context: Context) {
                 if (isLowRamDevice) {
                     inPreferredConfig = Bitmap.Config.RGB_565
                     inDither = true
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    inPreferredConfig = Bitmap.Config.HARDWARE
+                } else {
+                    // The same artwork is also drawn into VR's software window capture.
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
             }
 
@@ -99,6 +100,8 @@ class DiskAssetLoader(context: Context) {
                 scaledBitmap.bitmap = ImageDecoder.decodeBitmap(
                     ImageDecoder.createSource(file)
                 ) { imageDecoder, imageInfo, _ ->
+                    // Keep assets loaded before entering VR valid for a software Canvas too.
+                    imageDecoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                     scaledBitmap.originalWidth = imageInfo.size.width
                     scaledBitmap.originalHeight = imageInfo.size.height
 

@@ -365,6 +365,7 @@ object AppActionSheet {
         }
 
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         dialog.window?.let { window ->
             window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
             if (fullScreen) {

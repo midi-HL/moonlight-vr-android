@@ -1248,9 +1248,9 @@ class StreamSettings : ThemedAppCompatActivity() {
         private var dialogHardwareInput = false
         private val preferenceDialogCallbacks = object : FragmentManager.FragmentLifecycleCallbacks() {
             override fun onFragmentStarted(fm: FragmentManager, fragment: Fragment) {
-                if (fragment.tag !in PREFERENCE_DIALOG_TAGS) return
                 val dialog = (fragment as? DialogFragment)?.dialog ?: return
                 com.limelight.vr.VrSession.registerDialog(dialog)
+                if (fragment.tag !in PREFERENCE_DIALOG_TAGS) return
                 dialog.setOnKeyListener { _, keyCode, event ->
                     if (event.action == KeyEvent.ACTION_DOWN) {
                         dialogHardwareInput = true
@@ -4943,6 +4943,7 @@ class StreamSettings : ThemedAppCompatActivity() {
         // Theme tint comes from the shared full-page overlay, including detail pages.
         // 强制 RGB_565：每像素 2 字节，整张图内存减半，模糊背景视觉无损
         val options = RequestOptions()
+                .disallowHardwareConfig()
                 .override(width, height)
                 .format(DecodeFormat.PREFER_RGB_565)
                 .transform(BlurTransformation(2, 3))

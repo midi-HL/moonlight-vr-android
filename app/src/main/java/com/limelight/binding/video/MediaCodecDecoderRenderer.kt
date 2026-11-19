@@ -212,7 +212,7 @@ class MediaCodecDecoderRenderer(
     @Volatile
     private var initialHeight = 0
     private var videoFormat = 0
-    private var renderTarget: SurfaceHolder? = null
+    @Volatile private var renderTarget: SurfaceHolder? = null
     private val pyrowaveDecoder = PyrowaveDecoderSession(
         gpuNative = FramegenPyrowaveNativeApi,
         onFatalFailure = { reason -> failPyrowaveSession(reason) },
@@ -526,28 +526,55 @@ class MediaCodecDecoderRenderer(
      * SurfaceFlinger, not by decor.draw(), so it never appears in the captured
      * window Bitmap. Registering a SurfaceTexture-backed Surface here lets the
      * GL renderer sample the decoded frames directly. Passing null switches
-     * back to the original SurfaceHolder — the codec keeps running, no stream
-     * reconnection and no decoder recreation.
-     *
-     * Framegen/HDR paths are left untouched: when framegen owns the output the
-     * switch is skipped and the decor projection still shows all 2D overlays.
+     * back to the original SurfaceHolder. A rejected live output switch is
+     * rolled back through the existing serialized codec-recovery path.
+     * Returns false if the requested VR target was not accepted.
      */
     @Volatile private var vrOutputSurface: Surface? = null
+    @Volatile private var vrOutputRecoveryPending = false
 
-    fun setVrOutputSurface(surface: Surface?) {
-        if (vrOutputSurface === surface) return
-        vrOutputSurface = surface
-        val decoder = videoDecoder ?: return
-        if (framegenOutputSwitchPending || framegenSurface != null) return
-        val target = surface ?: renderTarget?.surface ?: return
-        try {
-            if (target.isValid) {
-                decoder.setOutputSurface(target)
-                LimeLog.info("VR output surface switched: ${if (surface == null) "2D" else "VR"}")
-            }
-        } catch (t: Throwable) {
-            LimeLog.warning("VR output surface switch failed: ${t.javaClass.simpleName}: ${t.message}")
+    fun setVrOutputSurface(surface: Surface?): Boolean = synchronized(codecRecoveryMonitor) {
+        if (vrOutputSurface === surface) return@synchronized true
+        if (surface != null && (!surface.isValid || stopping || pyrowaveDecoderActive ||
+                framegenOutputSwitchPending || framegenSurface != null)
+        ) return@synchronized false
+
+        val decoder = videoDecoder
+        if (decoder == null || configuredFormat == null) {
+            // configureAndStartDecoder shares this monitor and will select this target.
+            vrOutputSurface = surface
+            return@synchronized true
         }
+        if (stopping && surface == null) {
+            vrOutputSurface = null
+            return@synchronized true
+        }
+
+        val target = surface ?: renderTarget?.surface
+        val failure = try {
+            if (target == null || !target.isValid) {
+                IllegalArgumentException("No valid output surface for VR transition")
+            } else {
+                decoder.setOutputSurface(target)
+                // Publish only after MediaCodec accepted the output. A failed entry can retry.
+                vrOutputSurface = surface
+                LimeLog.info("VR output surface switched: ${if (surface == null) "2D" else "VR"}")
+                return@synchronized true
+            }
+        } catch (failure: RuntimeException) {
+            failure
+        }
+        LimeLog.warning("VR output surface switch failed: ${failure.javaClass.simpleName}: ${failure.message}")
+        // Never reconfigure a rejected entry target. Restore the holder on restart;
+        // the registry may release its SurfaceTexture once this recovery is queued.
+        if (surface == null) vrOutputSurface = null
+        vrOutputRecoveryPending = true
+        codecRecoveryAttempts = 0
+        if (!codecRecoveryType.compareAndSet(CR_RECOVERY_TYPE_NONE, CR_RECOVERY_TYPE_RESTART)) {
+            codecRecoveryType.compareAndSet(CR_RECOVERY_TYPE_FLUSH, CR_RECOVERY_TYPE_RESTART)
+        }
+        (codecRecoveryMonitor as Object).notifyAll()
+        surface == null
     }
 
     private fun destroyPyrowaveDecoder() {
@@ -1081,7 +1108,7 @@ class MediaCodecDecoderRenderer(
         )
     }
 
-    private fun configureAndStartDecoder(format: MediaFormat) {
+    private fun configureAndStartDecoder(format: MediaFormat) = synchronized(codecRecoveryMonitor) {
         hdr10PlusOutputObserver.restartCodecConfiguration()
         stableOutputFormatTracker.reset()
 
@@ -1223,6 +1250,7 @@ class MediaCodecDecoderRenderer(
         if (framegenOutputSwitchPending && framegenOutputSwitchReady.get()) {
             requestFramegenOutputSurfaceSwitch("decoder started after framegen prewarm")
         }
+        vrOutputRecoveryPending = false
     }
 
     private fun tryConfigureDecoder(
@@ -1829,6 +1857,12 @@ class MediaCodecDecoderRenderer(
             }
         }
 
+        // A rejected output restoration must not silently stop decoding while the stream stays live.
+        if (stopping && vrOutputRecoveryPending) {
+            vrOutputRecoveryPending = false
+            if (recoveryFailure == null) recoveryFailure = RendererException(createDiagnostics(),
+                IllegalStateException("Could not restore decoder output after a VR transition"))
+        }
         // Report after releasing the monitor so connection teardown can join recovery waiters.
         recoveryFailure?.let {
             it.printStackTrace()
@@ -2165,7 +2199,9 @@ class MediaCodecDecoderRenderer(
             // If we don't have an input buffer index yet, fetch one now
             if (asyncModeEnabled) {
                 // Async mode: input buffers arrive via onInputBufferAvailable callback
-                while (nextInputBufferIndex < 0 && !stopping) {
+                while (nextInputBufferIndex < 0 && !stopping &&
+                    codecRecoveryType.get() == CR_RECOVERY_TYPE_NONE
+                ) {
                     try {
                         val index = availableInputBuffers!!.poll(1, TimeUnit.SECONDS)
                         if (index != null) {
@@ -2178,7 +2214,9 @@ class MediaCodecDecoderRenderer(
                 }
             } else {
                 // Sync mode: poll the decoder directly
-                while (nextInputBufferIndex < 0 && !stopping) {
+                while (nextInputBufferIndex < 0 && !stopping &&
+                    codecRecoveryType.get() == CR_RECOVERY_TYPE_NONE
+                ) {
                     nextInputBufferIndex = decoder.dequeueInputBuffer(5000)
                 }
             }
@@ -2266,6 +2304,7 @@ class MediaCodecDecoderRenderer(
 
         // Stop any active codec recovery operations
         synchronized(codecRecoveryMonitor) {
+            vrOutputRecoveryPending = false
             codecRecoveryType.set(CR_RECOVERY_TYPE_NONE)
             (codecRecoveryMonitor as Object).notifyAll()
         }

@@ -45,6 +45,7 @@ class SpinnerDialog private constructor(
                 rundownDialogs.add(this)
                 newProgress.show()
             }
+            com.limelight.vr.VrSession.registerDialog(newProgress)
 
             // 设置对话框透明度
             newProgress.window?.let { window ->

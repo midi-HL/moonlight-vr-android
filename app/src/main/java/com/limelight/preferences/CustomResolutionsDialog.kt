@@ -205,6 +205,7 @@ object CustomResolutionsDialog {
             onClosed()
         }
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         applyDialogWidth(dialog, context)
         composeView.post {
             if (dialog.isShowing && requestInitialFocus && !touchNavigationActive.value) {

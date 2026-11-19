@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vr_enter">Войти в VR</string>
+    <string name="vr_unavailable">Для VR нужны Android 7.0 или новее, совместимая 64-разрядная среда и OpenGL ES 3.0.</string>
+    <string name="vr_restart_stream">Вернитесь на главный экран Moonlight, включите VR и начните трансляцию в совместимом режиме SDR.</string>
+    <string name="vr_panel_title">Настройки VR</string>
+    <string name="vr_panel_position">%1$d / %2$d</string>
+    <string name="vr_panel_session">Сеанс</string>
+    <string name="vr_panel_display">Изображение</string>
+    <string name="vr_panel_tracking">Отслеживание и комфорт</string>
+    <string name="vr_panel_controller">Геймпад</string>
+    <string name="vr_panel_on">Вкл.</string>
+    <string name="vr_panel_off">Выкл.</string>
+    <string name="vr_panel_zoom">Масштаб</string>
+    <string name="vr_panel_recenter">Центрировать вид</string>
+    <string name="vr_panel_exit">Выйти из VR</string>
+    <string name="vr_panel_hint">↑ ↓ Выбор     A Изменить     B Закрыть</string>
+    <string name="vr_panel_edit_hint">← → или стик Изменить     A Готово     B Назад</string>
+</resources>

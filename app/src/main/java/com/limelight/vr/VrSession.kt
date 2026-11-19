@@ -17,7 +17,9 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
+import android.widget.PopupWindow
 import java.lang.ref.WeakReference
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -134,6 +136,17 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     fun toggle(context: Context) = setEnabled(context, !enabled)
+
+    /** A GL-thread output failure rolls back the current projection on the main thread. */
+    fun onVideoOutputFailure(isCurrent: () -> Boolean = { true }) {
+        mainHandler.post {
+            if (!enabled || !isCurrent()) return@post
+            val context = activeActivity ?: app ?: return@post
+            updateSettings(context, settings.copy(enabled = false))
+            android.widget.Toast.makeText(context, com.limelight.R.string.vr_surface_failed,
+                android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // P-E10: short-tap recentre state. Touch events are otherwise swallowed by
     // VrActivityHooks so the hidden 2D UI can never steal focus.
@@ -262,7 +275,12 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         driverSnapshots.forget(sourceId) { key -> handle(router.onKey(key, VrKeys.ACTION_UP, true, sourceId)) }
     }
 
-    private data class DialogWindow(val owner: WeakReference<Activity>, val decor: WeakReference<View>)
+    private data class DialogWindow(
+        val owner: WeakReference<Activity>,
+        val decor: WeakReference<View>,
+        val window: WeakReference<Window>?,
+        val alpha: VrFloatingWindowAlpha = VrFloatingWindowAlpha(),
+    )
     private val dialogDecors = ArrayList<DialogWindow>()
 
     /** Install the input hook in the actual focused Window and register the decor for capture. */
@@ -273,9 +291,61 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         if (window.callback !is VrActivityHooks) {
             window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true)
         }
-        dialogDecors.removeAll { it.decor.get() == null || it.owner.get() == null || it.decor.get() === decor }
-        dialogDecors.add(DialogWindow(WeakReference(owner), WeakReference(decor)))
+        registerFloatingWindow(owner, decor, window)
+    }
+
+    /** PopupWindow exposes a root View rather than a public Android Window. Call after show(). */
+    fun registerPopupWindow(popup: PopupWindow, owner: Activity) {
+        if (!popup.isShowing) return
+        registerFloatingWindow(owner, popup.contentView.rootView, null)
+    }
+
+    private fun registerFloatingWindow(owner: Activity, decor: View, window: Window?) {
+        dialogDecors.removeAll { it.decor.get() == null || it.owner.get() == null }
+        val existing = dialogDecors.firstOrNull { it.decor.get() === decor }
+        val registration = existing ?: DialogWindow(WeakReference(owner), WeakReference(decor),
+            window?.let { WeakReference(it) }).also { entry ->
+            decor.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.post { updateFloatingWindow(entry) }
+                }
+
+                override fun onViewDetachedFromWindow(view: View) {
+                    updateFloatingWindow(entry, forceVisible = true)
+                }
+            })
+        }
+        dialogDecors.remove(registration)
+        dialogDecors.add(registration)
+        // Run after the caller's post-show sizing/opacity updates.
+        decor.post { updateFloatingWindow(registration) }
         onWindowDirty?.invoke()
+    }
+
+    private fun updateFloatingWindow(entry: DialogWindow, forceVisible: Boolean = false) {
+        val owner = entry.owner.get() ?: return
+        val decor = entry.decor.get() ?: return
+        val hidden = !forceVisible && enabled && activeActivity === owner && decor.isAttachedToWindow
+        val window = entry.window?.get()
+        if (window != null) {
+            val attributes = window.attributes
+            val alpha = entry.alpha.update(attributes.alpha, hidden) ?: return
+            window.attributes = attributes.also { it.alpha = alpha }
+        } else {
+            val attributes = decor.layoutParams as? WindowManager.LayoutParams ?: return
+            val alpha = entry.alpha.update(attributes.alpha, hidden) ?: return
+            attributes.alpha = alpha
+            if (decor.isAttachedToWindow) {
+                val manager = owner.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                manager.updateViewLayout(decor, attributes)
+            }
+        }
+    }
+
+    private fun syncFloatingWindows() = dialogDecors.toList().forEach { updateFloatingWindow(it) }
+
+    private fun restoreFloatingWindows(owner: Activity) {
+        dialogDecors.filter { it.owner.get() === owner }.forEach { updateFloatingWindow(it, forceVisible = true) }
     }
 
     fun activeDialogDecors(source: View): List<View> = dialogDecors.mapNotNull { entry ->
@@ -378,6 +448,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun refreshHosts() {
+        syncFloatingWindows()
         val activity = activeActivity ?: return
         if (enabled) {
             if (activeHost == null) {
@@ -458,6 +529,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityPaused(activity: Activity) {
         if (activeActivity === activity) {
+            restoreFloatingWindows(activity)
             cancelPendingInput()
             activeActivity = null
             releaseActiveHost()
@@ -478,6 +550,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityDestroyed(activity: Activity) {
         onActivityPaused(activity)
+        restoreFloatingWindows(activity)
+        dialogDecors.removeAll { it.owner.get() == null || it.owner.get() === activity }
         windowStates.remove(activity)
     }
 

@@ -51,6 +51,7 @@ class VrRuntimeTest {
 
     @Test fun stereoLifecycleDialogAndKeyDispatchStayUsable() {
         val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
         val launch = Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val scenario = ActivityScenario.launch<PcView>(launch)
         try {
@@ -89,6 +90,24 @@ class VrRuntimeTest {
         } finally {
             instrumentation.runOnMainSync { VrSession.updateSettings(context, original) }
             scenario.close()
+        }
+    }
+
+    @Test fun controllerStepsKeepTheirExactPersistedMilliUnits() {
+        val original = VrSettingsStore.load(context)
+        try {
+            for (steps in listOf(27, 30, 33, 36, 40, 43, 46, 49)) {
+                val expected = steps * 0.02f
+                VrSettingsStore.save(context, VrSettings.DEFAULT.copy(ipdScale = expected))
+                assertEquals(expected, VrSettingsStore.load(context).ipdScale, 0.000001f)
+            }
+            for (steps in listOf(9, 10, 15, 18, 20, 23, 27)) {
+                val expected = steps * 0.01f
+                VrSettingsStore.save(context, VrSettings.DEFAULT.copy(gamepadDeadZone = expected))
+                assertEquals(expected, VrSettingsStore.load(context).gamepadDeadZone, 0.000001f)
+            }
+        } finally {
+            VrSettingsStore.save(context, original)
         }
     }
 

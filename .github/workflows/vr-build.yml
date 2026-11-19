@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
+      ORG_GRADLE_PROJECT_vrReviewBuild: 'true'
       AUDIO_HAPTICS_SDK_REF: b3f97c3bb7500ea7b1985aea568e5c7b40308d3b
       AUDIO_HAPTICS_SDK_DIR: ${{ github.workspace }}/.deps/moonlight-audio-haptics
       GITHUB_OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || secrets.OAUTH_CLIENT_ID || '' }}
@@ -154,8 +155,11 @@ jobs:
                   sys.exit('FAIL: %s missing from AAR - VR entry would crash' % lib)
           PY
 
-      - name: Run VR JVM unit tests
-        run: ./gradlew --no-daemon --stacktrace :app:testNonRootDebugUnitTest --tests 'com.limelight.vr.*'
+      - name: Run full JVM unit suite
+        run: ./gradlew --no-daemon --stacktrace :app:testNonRootDebugUnitTest
+
+      - name: Run Android lint
+        run: ./gradlew --no-daemon --stacktrace :app:lintNonRootDebug
 
       - name: Assert VR JVM tests actually ran
         if: success()
@@ -238,4 +242,5 @@ jobs:
           path: |
             app/build/reports/tests/testNonRootDebugUnitTest/
             app/build/test-results/testNonRootDebugUnitTest/
+            app/build/reports/lint-results-nonRootDebug.*
           if-no-files-found: ignore

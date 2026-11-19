@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="vr_surface_failed">The decoder rejected VR output. Returned to 2D; the stream connection is preserved when recovery succeeds.</string>
     <string name="vr_enter">Enter VR</string>
     <string name="vr_unavailable">VR requires Android 7.0 or later, a supported 64-bit runtime, and OpenGL ES 3.0.</string>
     <string name="vr_restart_stream">Return to the Moonlight home screen, enter VR, then restart the stream in compatible SDR mode.</string>

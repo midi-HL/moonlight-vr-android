@@ -24,6 +24,7 @@ object AppDialogStyler {
         onDismiss: () -> Unit = dialog::cancel,
         dismissOnBack: Boolean = false
     ) {
+        com.limelight.vr.VrSession.registerDialog(dialog)
         dialog.setOnKeyListener { _, keyCode, event ->
             UiDismissKeyHandler.handle(event.action, keyCode, onDismiss, dismissOnBack)
         }

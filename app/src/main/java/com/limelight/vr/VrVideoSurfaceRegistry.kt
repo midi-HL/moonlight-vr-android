@@ -33,7 +33,7 @@ internal object VrVideoSurfaceRegistry {
     /** Decoder registers itself from Game; immediately adopts an active VR surface. */
     @Synchronized fun attachDecoder(renderer: MediaCodecDecoderRenderer) {
         decoder = WeakReference(renderer)
-        renderer.setVrOutputSurface(surface)
+        switchOutput(renderer, surface, surfaceOwner)
     }
 
     @Synchronized fun detachDecoder(renderer: MediaCodecDecoderRenderer) {
@@ -51,7 +51,18 @@ internal object VrVideoSurfaceRegistry {
         texture.setOnFrameAvailableListener {
             synchronized(this) { if (surfaceOwner === owner && surfaceTexture === texture) frameAvailable.set(true) }
         }
-        decoder?.get()?.setVrOutputSurface(output)
+        decoder?.get()?.let { switchOutput(it, output, owner) }
+    }
+
+    private fun switchOutput(renderer: MediaCodecDecoderRenderer, output: Surface?, owner: Any?) {
+        if (!renderer.setVrOutputSurface(output) && output != null) {
+            // Ignore an old renderer's queued failure after a new activity/stream takes over.
+            VrSession.onVideoOutputFailure {
+                synchronized(this) {
+                    decoder?.get() === renderer && surfaceOwner === owner && surface === output
+                }
+            }
+        }
     }
 
     /**

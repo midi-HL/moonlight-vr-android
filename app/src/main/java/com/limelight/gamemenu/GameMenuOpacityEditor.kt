@@ -103,6 +103,7 @@ internal object GameMenuOpacityEditor {
             }
         }
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         positionPopup(context, window, anchor)
         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         seekBar.post { seekBar.requestFocus() }

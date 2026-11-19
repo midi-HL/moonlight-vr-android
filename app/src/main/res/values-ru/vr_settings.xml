@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="category_vr">VR · Все экраны</string>
+    <string name="title_vr_enabled">Включить режим VR</string>
+    <string name="summary_vr_enabled">Показывать главный экран, настройки, диалоги и трансляцию в стереокинотеатре. Для входа удерживайте L1 + R1.</string>
+    <string name="title_vr_scale">Размер экрана</string>
+    <string name="summary_vr_scale">Размер виртуального экрана в кинотеатре</string>
+    <string name="title_vr_distance">Расстояние до экрана</string>
+    <string name="summary_vr_distance">Расстояние до виртуального экрана в метрах</string>
+    <string name="title_vr_brightness">Яркость</string>
+    <string name="summary_vr_brightness">Яркость виртуального экрана</string>
+    <string name="title_vr_curvature">Кривизна экрана</string>
+    <string name="summary_vr_curvature">Изогнуть виртуальный экран по дуге</string>
+    <string name="title_vr_head_tracking">Отслеживание головы</string>
+    <string name="summary_vr_head_tracking">При повороте головы экран остаётся на месте. Если отключить, экран следует за головой.</string>
+    <string name="title_vr_head_sensitivity">Чувствительность отслеживания</string>
+    <string name="summary_vr_head_sensitivity">Отклик на поворот головы</string>
+    <string name="title_vr_ipd">Разделение изображений</string>
+    <string name="summary_vr_ipd">Точная настройка горизонтального стереоразделения. Значение 1.00× использует профиль очков.</string>
+    <string name="title_vr_dead_zone">Мёртвая зона стика</string>
+    <string name="summary_vr_dead_zone">Минимальное отклонение стика для навигации по меню VR</string>
+    <string name="title_vr_repeat">Интервал повтора</string>
+    <string name="summary_vr_repeat">Задержка между шагами меню при удержании стика</string>
+    <string name="title_vr_recenter_on_enter">Центрировать при входе</string>
+    <string name="summary_vr_recenter_on_enter">При входе в VR принять текущее направление за центр</string>
+    <string name="title_vr_zoom">Масштаб изображения</string>
+    <string name="summary_vr_zoom">Увеличить итоговое стереоизображение с обрезкой по центру. Значение 1.00× сохраняет исходное изображение очков.</string>
+    <string name="title_vr_vertical_flip">Перевернуть видео по вертикали</string>
+    <string name="summary_vr_vertical_flip">Изменить ориентацию видео, если этого требует декодер. На меню не влияет.</string>
+    <string name="title_vr_align_line">Центральная направляющая</string>
+    <string name="summary_vr_align_line">Показывать неподвижную направляющую в центре физического дисплея</string>
+</resources>

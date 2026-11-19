@@ -119,6 +119,8 @@ class VrTheaterRenderer(
     private var lastCurvature = -1f
     private var lastVerticalFlip: Boolean? = null
     private var meshDirty = true
+    private var frameSettings = VrSession.settings
+    private var framePanelOpen = false
 
     private val headQuaternion = FloatArray(4)
     private val nextHeadQuaternion = FloatArray(4)
@@ -231,6 +233,9 @@ class VrTheaterRenderer(
     override fun onSurfaceChanged(width: Int, height: Int) = Unit
 
     override fun onNewFrame(headTransform: HeadTransform) {
+        // Both eyes and final composition must use one settings snapshot.
+        frameSettings = VrSession.settings
+        framePanelOpen = VrSession.panelOpen
         headTransform.getQuaternion(nextHeadQuaternion, 0)
         val x = nextHeadQuaternion[0]
         val y = nextHeadQuaternion[1]
@@ -241,7 +246,7 @@ class VrTheaterRenderer(
             nextHeadQuaternion.copyInto(headQuaternion)
             val firstPose = !hasHeadPose
             hasHeadPose = true
-            if (recenterPending || (firstPose && VrSession.settings.recenterOnEnter)) recenter()
+            if (recenterPending || (firstPose && frameSettings.recenterOnEnter)) recenter()
         }
         // One capture per FRAME, not per eye. Both onDrawEye calls use the same
         // uploaded GL texture, so consuming on each eye would drop half the UI.
@@ -259,7 +264,7 @@ class VrTheaterRenderer(
                 capture.returnPanel(bitmap)
             }
         }
-        if (!VrSession.panelOpen) hasQuickPanelFrame = false
+        if (!framePanelOpen) hasQuickPanelFrame = false
         if (isVideoHost && VrVideoSurfaceRegistry.consumeFrameAvailable(this)) {
             val texture = videoSurfaceTexture ?: return
             try {
@@ -291,7 +296,7 @@ class VrTheaterRenderer(
     }
 
     override fun onDrawEye(eye: CardboardView.Eye) {
-        val s = VrSession.settings
+        val s = frameSettings
         if (s.screenScale != lastScale || s.screenDistanceMeters != lastDistance ||
             s.curvature != lastCurvature || s.verticalFlip != lastVerticalFlip) meshDirty = true
         if (meshDirty && textureWidth > 0) rebuildMesh(textureWidth.toFloat() / textureHeight.toFloat())
@@ -332,7 +337,7 @@ class VrTheaterRenderer(
             }
         }
 
-        if (VrSession.panelOpen && hasQuickPanelFrame && panelProgram != null) {
+        if (framePanelOpen && hasQuickPanelFrame && panelProgram != null) {
             VrMatrix4.multiplyInto(mvpMatrix, projection, eyeFromHead)
             enableBitmapBlending()
             drawQuad(panelProgram, mvpMatrix, 1f, GLES20.GL_TEXTURE_2D, quickPanelTextureId,
@@ -420,7 +425,7 @@ class VrTheaterRenderer(
     }
 
     private fun rebuildMesh(aspect: Float) {
-        val s = VrSession.settings
+        val s = frameSettings
         val mesh = VrScreenGeometry.build(
             scale = s.screenScale,
             distance = s.screenDistanceMeters,
@@ -463,8 +468,8 @@ class VrTheaterRenderer(
      * final image and is not affected by per-eye GL state.
      */
     override fun onFinishFrame(viewport: Viewport) {
-        val s = VrSession.settings
-        if (s.zoomScale > 1.001f && !VrSession.panelOpen) {
+        val s = frameSettings
+        if (s.zoomScale > 1.001f && !framePanelOpen) {
             drawZoomFill(viewport, s.zoomScale)
         }
         // P-D8: the fixed screen-space line is drawn LAST, never scaled.

@@ -713,10 +713,16 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         lateinit var popup: PopupWindow
         val menu = object : LinearLayout(this) {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (UiDismissKeyHandler.handle(event.action, event.keyCode, popup::dismiss)) {
-                    return true
+                return com.limelight.vr.VrInputDispatcher.dispatchKey(this@PcView, event, inDialog = true) { key ->
+                    UiDismissKeyHandler.handle(key.action, key.keyCode, popup::dismiss) || super.dispatchKeyEvent(key)
                 }
-                return super.dispatchKeyEvent(event)
+            }
+
+            override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+                if (com.limelight.vr.VrInputDispatcher.dispatchMotion(this@PcView, event, inDialog = true) {
+                        super.dispatchKeyEvent(it)
+                    }) return true
+                return super.dispatchGenericMotionEvent(event)
             }
         }.apply {
             orientation = LinearLayout.VERTICAL
@@ -727,6 +733,12 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         popup = PopupWindow(menu, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
             isOutsideTouchable = true
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setTouchInterceptor { _, event ->
+                if (com.limelight.vr.VrSession.enabled) {
+                    com.limelight.vr.VrSession.onVrTap(event)
+                    true
+                } else false
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 elevation = dpToPx(8).toFloat()
             }
@@ -792,6 +804,7 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         }
         val popupY = desiredY.coerceIn(0, (screenHeight - menuHeight).coerceAtLeast(0))
         popup.showAtLocation(anchor.rootView, Gravity.NO_GRAVITY, popupX, popupY)
+        com.limelight.vr.VrSession.registerPopupWindow(popup, this)
     }
 
     private fun addToolbarMenuItem(
@@ -1028,6 +1041,7 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         val (width, height) = backgroundDecodeSize()
         val request = Glide.with(this@PcView as Context)
             .asBitmap()
+            .disallowHardwareConfig()
             .load(verified ?: resolveGlideTarget(target))
             .skipMemoryCache(true)
             .signature(ObjectKey(resolved.cacheKey))
@@ -1152,6 +1166,7 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         backgroundDisplayTarget = displayTarget
         Glide.with(this as Context)
                 .load(safe)
+                .disallowHardwareConfig()
                 .diskCacheStrategy(if (guarded) DiskCacheStrategy.NONE else DiskCacheStrategy.AUTOMATIC)
                 .skipMemoryCache(guarded)
                 .apply(RequestOptions.bitmapTransform(BlurTransformation(2, 3)))
@@ -1379,6 +1394,7 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         val target = requireNotNull(resolved.target)
         val futureTarget = Glide.with(applicationContext)
             .asBitmap()
+            .disallowHardwareConfig()
             .load(resolveGlideTarget(target))
             .apply(
                 RequestOptions()

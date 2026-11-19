@@ -123,6 +123,7 @@ object AboutDialogLauncher {
             }
         }
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         applyDialogWidth(dialog, context, portraitMaxDp = 448, landscapeMaxDp = 860)
         return dialog
     }
@@ -172,6 +173,7 @@ object AboutDialogLauncher {
             }
         }
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         applyDialogWidth(dialog, context, portraitMaxDp = 650, landscapeMaxDp = 920)
         return dialog
     }

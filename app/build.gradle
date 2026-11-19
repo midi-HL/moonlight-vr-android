@@ -22,7 +22,8 @@ def escapeBuildConfigString = { value ->
     value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 def enableX86TestAbi = (project.findProperty("enableX86TestAbi") ?: "false").toString().toBoolean()
-def audioHapticsAppLabel = "Moonlight V+"
+def vrReviewBuild = (project.findProperty("vrReviewBuild") ?: "false").toString().toBoolean()
+def audioHapticsAppLabel = vrReviewBuild ? "Moonlight VR Review" : "Moonlight V+"
 def audioHapticsSdkDir = (
         project.findProperty("audioHapticsSdkDir")
                 ?: localProperties.getProperty("audioHapticsSdkDir")
@@ -168,6 +169,14 @@ android {
     def hasSigningConfig = keystorePath != null && keystorePassword != null && envKeyAlias != null && envKeyPassword != null && new File(keystorePath).exists()
 
     signingConfigs {
+        if (vrReviewBuild) {
+            debug {
+                storeFile rootProject.file('.github/testing/vr-review-debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
         if (hasSigningConfig) {
             release {
                 storeFile file(keystorePath)
@@ -180,7 +189,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".vplus_debug"
+            applicationIdSuffix(vrReviewBuild ? ".vplus_debug.vrreview" : ".vplus_debug")
             resValue "string", "app_label", audioHapticsAppLabel
             resValue "string", "app_label_root", audioHapticsAppLabel
 

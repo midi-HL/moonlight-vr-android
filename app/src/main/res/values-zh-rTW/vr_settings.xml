@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="category_vr">VR 視圖（全介面）</string>
+    <string name="title_vr_enabled">啟用 VR 視圖</string>
+    <string name="summary_vr_enabled">將主頁面、設定、對話方塊和串流投影到雙目影院；按住手把 L1 + R1 即可進入。</string>
+    <string name="title_vr_scale">螢幕大小</string>
+    <string name="summary_vr_scale">調整影院中虛擬螢幕的視覺尺寸</string>
+    <string name="title_vr_distance">螢幕距離</string>
+    <string name="summary_vr_distance">虛擬螢幕與眼睛之間的距離，以公尺為單位</string>
+    <string name="title_vr_brightness">畫面亮度</string>
+    <string name="summary_vr_brightness">虛擬螢幕的亮度</string>
+    <string name="title_vr_curvature">螢幕曲率</string>
+    <string name="summary_vr_curvature">將虛擬螢幕彎成影院弧面</string>
+    <string name="title_vr_head_tracking">頭部追蹤</string>
+    <string name="summary_vr_head_tracking">轉頭時將螢幕固定在空間中；關閉後螢幕跟隨頭部。</string>
+    <string name="title_vr_head_sensitivity">追蹤靈敏度</string>
+    <string name="summary_vr_head_sensitivity">頭部轉動的反應比例</string>
+    <string name="title_vr_ipd">等效瞳距</string>
+    <string name="summary_vr_ipd">微調雙眼的水平視差；1.00× 使用檢視器設定。</string>
+    <string name="title_vr_dead_zone">搖桿死區</string>
+    <string name="summary_vr_dead_zone">觸發 VR 選單導航所需的最小搖桿偏移</string>
+    <string name="title_vr_repeat">重複間隔</string>
+    <string name="summary_vr_repeat">按住搖桿時連續調整選單的間隔</string>
+    <string name="title_vr_recenter_on_enter">進入時重置中心</string>
+    <string name="summary_vr_recenter_on_enter">進入 VR 時將目前朝向設為中心</string>
+    <string name="title_vr_zoom">整體縮放</string>
+    <string name="summary_vr_zoom">從中心裁切並放大最終雙目畫面；1.00× 保留檢視器的原始影像。</string>
+    <string name="title_vr_vertical_flip">垂直翻轉串流</string>
+    <string name="summary_vr_vertical_flip">解碼器輸出方向相反時可切換；不影響選單。</string>
+    <string name="title_vr_align_line">中心輔助線</string>
+    <string name="summary_vr_align_line">在實體螢幕中央顯示固定的輔助線</string>
+</resources>

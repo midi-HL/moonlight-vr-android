@@ -41,6 +41,7 @@ class VrWindowCapture(
 
     fun markDirty() {
         if (stopped) return
+        lastPanelSettings = null
         handler.removeCallbacks(tick)
         handler.post(tick)
     }

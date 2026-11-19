@@ -3,6 +3,7 @@ package com.limelight.vr
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
+import kotlin.math.roundToInt
 
 /**
  * Single owner of VR preferences. Uses PreferenceManager's default file so the
@@ -56,17 +57,17 @@ object VrSettingsStore {
         val s = value.sanitized()
         prefs(context).edit()
             .putBoolean(K_ENABLED, s.enabled)
-            .putInt(K_SCALE, (s.screenScale * M).toInt())
-            .putInt(K_DISTANCE, (s.screenDistanceMeters * M).toInt())
-            .putInt(K_BRIGHTNESS, (s.brightness * M).toInt())
-            .putInt(K_CURVATURE, (s.curvature * M).toInt())
+            .putInt(K_SCALE, (s.screenScale * M).roundToInt())
+            .putInt(K_DISTANCE, (s.screenDistanceMeters * M).roundToInt())
+            .putInt(K_BRIGHTNESS, (s.brightness * M).roundToInt())
+            .putInt(K_CURVATURE, (s.curvature * M).roundToInt())
             .putBoolean(K_HEAD, s.headTrackingEnabled)
-            .putInt(K_HEAD_SENS, (s.headTrackingSensitivity * M).toInt())
-            .putInt(K_DEAD_ZONE, (s.gamepadDeadZone * M).toInt())
+            .putInt(K_HEAD_SENS, (s.headTrackingSensitivity * M).roundToInt())
+            .putInt(K_DEAD_ZONE, (s.gamepadDeadZone * M).roundToInt())
             .putInt(K_REPEAT, s.menuRepeatMs.toInt())
-            .putInt(K_IPD, (s.ipdScale * M).toInt())
+            .putInt(K_IPD, (s.ipdScale * M).roundToInt())
             .putBoolean(K_RECENTER, s.recenterOnEnter)
-            .putInt(K_ZOOM, (s.zoomScale * M).toInt())
+            .putInt(K_ZOOM, (s.zoomScale * M).roundToInt())
             .putBoolean(K_V_FLIP, s.verticalFlip)
             .putBoolean(K_ALIGN_LINE, s.showCenterAlignmentLine)
             .apply()

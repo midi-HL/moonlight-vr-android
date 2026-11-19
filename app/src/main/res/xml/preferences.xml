@@ -1378,7 +1378,7 @@
             seekbar:min="500"
             android:max="2200"
             seekbar:step="50"
-            seekbar:keyStep="1"
+            seekbar:keyStep="50"
             seekbar:divisor="1000"
             android:text="x" />
         <com.limelight.preferences.SeekBarPreference
@@ -1389,7 +1389,7 @@
             seekbar:min="800"
             android:max="5000"
             seekbar:step="100"
-            seekbar:keyStep="1"
+            seekbar:keyStep="100"
             seekbar:divisor="1000"
             android:text="m" />
         <com.limelight.preferences.SeekBarPreference
@@ -1400,7 +1400,7 @@
             seekbar:min="300"
             android:max="1000"
             seekbar:step="50"
-            seekbar:keyStep="1"
+            seekbar:keyStep="50"
             seekbar:divisor="1000"
             android:text="x" />
         <com.limelight.preferences.SeekBarPreference
@@ -1411,7 +1411,7 @@
             seekbar:min="0"
             android:max="1000"
             seekbar:step="50"
-            seekbar:keyStep="1"
+            seekbar:keyStep="50"
             seekbar:divisor="1000"
             android:text="x" />
         <CheckBoxPreference
@@ -1427,7 +1427,7 @@
             seekbar:min="250"
             android:max="2000"
             seekbar:step="50"
-            seekbar:keyStep="1"
+            seekbar:keyStep="50"
             seekbar:divisor="1000"
             android:text="x" />
         <com.limelight.preferences.SeekBarPreference
@@ -1438,7 +1438,7 @@
             seekbar:min="500"
             android:max="1600"
             seekbar:step="20"
-            seekbar:keyStep="1"
+            seekbar:keyStep="20"
             seekbar:divisor="1000"
             android:text="x" />
         <com.limelight.preferences.SeekBarPreference
@@ -1449,7 +1449,7 @@
             seekbar:min="50"
             android:max="500"
             seekbar:step="10"
-            seekbar:keyStep="1"
+            seekbar:keyStep="10"
             seekbar:divisor="1000"
             android:text="" />
         <com.limelight.preferences.SeekBarPreference
@@ -1460,7 +1460,7 @@
             seekbar:min="60"
             android:max="400"
             seekbar:step="20"
-            seekbar:keyStep="1"
+            seekbar:keyStep="20"
             android:text="ms" />
         <CheckBoxPreference
             android:key="vr_recenter_on_enter"
@@ -1475,7 +1475,7 @@
             seekbar:min="1000"
             android:max="2500"
             seekbar:step="50"
-            seekbar:keyStep="1"
+            seekbar:keyStep="50"
             seekbar:divisor="1000"
             android:text="x" />
         <CheckBoxPreference
