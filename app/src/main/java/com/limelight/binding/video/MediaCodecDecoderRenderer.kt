@@ -171,6 +171,13 @@ class MediaCodecDecoderRenderer(
         return outputFormat?.decodedSize()
     }
 
+    internal fun vrVideoAspect(): Float {
+        val size = decodedOutputSize()
+        val width = size?.first ?: initialWidth
+        val height = size?.second ?: initialHeight
+        return if (width > 0 && height > 0) width.toFloat() / height else 0f
+    }
+
     private fun MediaFormat.decodedSize(): Pair<Int, Int>? = try {
         val width = if (containsKey("crop-right") && containsKey("crop-left"))
             getInteger("crop-right") - getInteger("crop-left") + 1
@@ -243,7 +250,7 @@ class MediaCodecDecoderRenderer(
     private var codecRecoveryAttempts = 0
 
     private var inputFormat: MediaFormat? = null
-    private var outputFormat: MediaFormat? = null
+    @Volatile private var outputFormat: MediaFormat? = null
     private val stableOutputFormatTracker = StableOutputFormatTracker()
     private var configuredFormat: MediaFormat? = null
     private val decoderConfigurationLock = Any()

@@ -63,6 +63,7 @@ class Dialog private constructor(
             rundownDialogs.add(this)
             alert.show()
         }
+        com.limelight.vr.VrSession.registerDialog(alert)
         notifyVisibilityChanged()
 
         AppDialogStyler.apply(alert, activity)
@@ -159,6 +160,7 @@ class Dialog private constructor(
             rundownDialogs.add(this)
             alert.show()
         }
+        com.limelight.vr.VrSession.registerDialog(alert)
         notifyVisibilityChanged()
 
         alert.window?.let { window ->

@@ -1,70 +1,60 @@
 package com.limelight.vr
 
 import android.app.Activity
+import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.View
+import com.limelight.Game
 
-/**
- * Funnels physical gamepad input into the VR layer BEFORE the Activity sees it.
- * VrActivityHooks installs this at the Window.Callback level, so 600+ existing
- * screens need no per-class edits.
- *
- * Ownership rules (they prevent the double-handling that made B exit PcView and
- * A double-click a Preference after closing the VR panel):
- *  - While the quick panel is OPEN the VR layer owns every gamepad key. Nothing
- *    reaches the Activity, so ClosePanel cannot also trigger the 2D back stack.
- *  - With the panel CLOSED, only A/B are translated into DPAD_CENTER/BACK and
- *    delivered to the DECOR VIEW hierarchy (never back through
- *    Activity.dispatchKeyEvent, which would re-enter the hook and let
- *    StreamSettings apply its own BUTTON_A mapping a second time).
- *  - L1/R1 are NOT remapped: StreamSettings already uses them to open/close its
- *    drawer, and in VR they are the global "enter VR" combo.
- */
+/** Routes input through the next Android Window.Callback without redispatching into its decor. */
 object VrInputDispatcher {
-    fun dispatchKey(activity: Activity, event: KeyEvent): Boolean {
-        // P-E8: while VR is on, treat every source as a potential controller.
-        // Bluetooth pads frequently report face buttons as SOURCE_KEYBOARD.
-        val isGamepad = if (VrSession.enabled) true else VrGamepadRouter.isGamepad(event.source)
-        if (!VrSession.enabled) {
-            // L1+R1 is a global "enter VR" shortcut, even on the home page.
-            return VrSession.onKeyEvent(event)
-        }
-        if (VrSession.onKeyEvent(event)) return true
-        if (VrSession.panelOpen) {
-            // Panel owns input exclusively; router already returned PassThrough
-            // for unknown keys, but they must still not reach the hidden 2D UI.
-            return isGamepad
-        }
-        if (!isGamepad) return false
-        // This app KEEPS THE 2D UI LIVE in VR and streams controller input to
-        // the host, so unlike OpenNOW-VR we must NOT swallow every unhandled
-        // key: Game.onKeyDown / KeyboardInputRouter need them. Only D-pad is
-        // delivered straight to the decor (native focus navigation) to avoid
-        // re-entering this Window.Callback hook through the Activity.
-        if (event.keyCode in VrKeys.FOCUS_KEYS) {
-            return activity.window?.decorView?.dispatchKeyEvent(event) ?: true
-        }
-        val mapped = mapKey(event.keyCode) ?: return false
-        val clone = KeyEvent(
-            event.downTime, event.eventTime, event.action, mapped,
-            event.repeatCount, event.metaState, event.deviceId, event.scanCode,
-            event.flags, event.source,
-        )
-        // A visible Dialog owns a separate Window and has focus; deliver the
-        // translated key there first, otherwise fall back to the Activity decor.
-        val dialogDecor = VrSession.activeDialogDecors().lastOrNull()
-        val target: View? = dialogDecor ?: activity.window?.decorView
-        return target?.dispatchKeyEvent(clone) ?: false
+    internal fun isControllerKey(event: KeyEvent): Boolean =
+        VrGamepadRouter.isGamepad(event.source) ||
+            VrGamepadRouter.isGamepad(event.device?.sources ?: 0) ||
+            event.keyCode in KeyEvent.KEYCODE_BUTTON_A..KeyEvent.KEYCODE_BUTTON_MODE ||
+            (VrSession.enabled && event.keyCode in VrKeys.FOCUS_KEYS) ||
+            (VrSession.panelOpen && event.keyCode == VrKeys.ENTER)
+
+    fun dispatchKey(
+        activity: Activity,
+        event: KeyEvent,
+        inDialog: Boolean,
+        deliver: (KeyEvent) -> Boolean,
+    ): Boolean {
+        val controllerKey = isControllerKey(event)
+        // BACK from a controller can be the game's legacy SELECT button.
+        val backOwnedByHost = inDialog || (activity is Game && activity.connected && controllerKey)
+        if (VrSession.onKeyEvent(event, controllerKey, backOwnedByHost)) return true
+        if (!VrSession.enabled || !controllerKey || activity is Game) return deliver(event)
+
+        // Existing Android dialogs may own Button B via OnKeyListener. A fallback
+        // mapping is needed for dialogs and Views that expect DPAD_CENTER for A.
+        // Deliver through the original callback: DecorView.dispatchKeyEvent would
+        // call our Window.Callback again for the same event.
+        if (event.keyCode != VrKeys.BUTTON_A) return deliver(event)
+        if (deliver(event)) return true
+        val mapped = KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER,
+            event.repeatCount, event.metaState, event.deviceId, 0, event.flags, event.source)
+        return deliver(mapped)
     }
 
-    fun dispatchMotion(activity: Activity, event: MotionEvent): Boolean {
+    fun dispatchMotion(
+        activity: Activity,
+        event: MotionEvent,
+        inDialog: Boolean,
+        deliverKey: (KeyEvent) -> Boolean,
+    ): Boolean {
+        if (!VrSession.enabled || event.actionMasked != MotionEvent.ACTION_MOVE ||
+            !VrGamepadRouter.isGamepad(event.source)) return false
         if (VrSession.onMotionEvent(event)) return true
-        if (!VrSession.enabled || VrSession.panelOpen) return false
-        // Same P-E8 rule as dispatchKey: no source gate while VR is on.
+        // A stream (including its START wheel) consumes real stick and HAT state.
+        // Its native game menu also owns its axis navigation, so keep both paths.
+        if (activity is Game && (!inDialog || activity.hasNativeGameMenu())) return false
         VrSession.onUiNavigation(
             event.getAxisValue(VrKeys.AXIS_X),
             event.getAxisValue(VrKeys.AXIS_Y),
+            event.getAxisValue(VrKeys.AXIS_HAT_X),
             event.getAxisValue(VrKeys.AXIS_HAT_Y),
             event.eventTime,
         )
@@ -77,20 +67,12 @@ object VrInputDispatcher {
             2 -> KeyEvent.KEYCODE_DPAD_RIGHT
             else -> return false
         }
-        val decor = VrSession.activeDialogDecors().lastOrNull()
-            ?: activity.window?.decorView ?: return false
-        // Send a complete DOWN+UP pair so Android's focus finder moves exactly once.
-        val down = KeyEvent(event.downTime, event.eventTime, KeyEvent.ACTION_DOWN,
-            keyCode, 0, event.metaState, event.deviceId, 0, event.flags, event.source)
+        val time = SystemClock.uptimeMillis()
+        val down = KeyEvent(time, time, KeyEvent.ACTION_DOWN, keyCode, 0,
+            event.metaState, event.deviceId, 0, 0, InputDevice.SOURCE_DPAD)
         val up = KeyEvent.changeAction(down, KeyEvent.ACTION_UP)
-        decor.dispatchKeyEvent(down)
-        decor.dispatchKeyEvent(up)
+        deliverKey(down)
+        deliverKey(up)
         return true
-    }
-
-    private fun mapKey(keyCode: Int): Int? = when (keyCode) {
-        VrKeys.BUTTON_A -> KeyEvent.KEYCODE_DPAD_CENTER
-        VrKeys.BUTTON_B -> KeyEvent.KEYCODE_BACK
-        else -> null
     }
 }

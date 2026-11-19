@@ -1481,6 +1481,7 @@ class GameMenu(
         }
 
         dialog.show()
+        com.limelight.vr.VrSession.registerDialog(dialog)
         dialog.window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         applyDialogSize(dialog)
     }
@@ -1824,6 +1825,7 @@ class GameMenu(
         activeChildDialog = dialog
         activeChildDismissKeyHandler = onDismissKey
 
+        com.limelight.vr.VrSession.registerDialog(dialog)
         val decorView = dialog.window?.decorView
         decorView?.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN) {

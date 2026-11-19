@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vr_enter">Enter VR</string>
+    <string name="vr_unavailable">VR requires Android 7.0 or later, a supported 64-bit runtime, and OpenGL ES 3.0.</string>
+    <string name="vr_restart_stream">Return to the Moonlight home screen, enter VR, then restart the stream in compatible SDR mode.</string>
+    <string name="vr_panel_title">VR controls</string>
+    <string name="vr_panel_position">%1$d / %2$d</string>
+    <string name="vr_panel_session">Session</string>
+    <string name="vr_panel_display">Display</string>
+    <string name="vr_panel_tracking">Tracking and comfort</string>
+    <string name="vr_panel_controller">Controller</string>
+    <string name="vr_panel_on">On</string>
+    <string name="vr_panel_off">Off</string>
+    <string name="vr_panel_zoom">Fit zoom</string>
+    <string name="vr_panel_recenter">Recenter view</string>
+    <string name="vr_panel_exit">Exit VR</string>
+    <string name="vr_panel_hint">↑ ↓ Browse     A Select or adjust     B Close</string>
+    <string name="vr_panel_edit_hint">← → or stick Adjust     A Done     B Back</string>
+</resources>

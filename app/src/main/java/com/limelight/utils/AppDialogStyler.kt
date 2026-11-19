@@ -47,6 +47,7 @@ object AppDialogStyler {
     }
 
     fun applyChrome(dialog: Dialog, context: Context) {
+        com.limelight.vr.VrSession.registerDialog(dialog)
         tintTitle(dialog, context)
         tintButtons(dialog, context)
         clearTextShadows(dialog.window?.decorView)

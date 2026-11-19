@@ -1,17 +1,27 @@
 package com.limelight.vr
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.Application
+import android.app.Dialog
 import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.ContextWrapper
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import java.lang.ref.WeakReference
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import androidx.annotation.RequiresApi
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -29,8 +39,9 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     @Volatile private var app: Application? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val router = VrGamepadRouter()
-    private val hosts = LinkedHashMap<Activity, VrOverlayHost>()
     @Volatile private var activeActivity: Activity? = null
+    private var activeHost: VrOverlayHost? = null
+    private var systemBackRegistration: SystemBackRegistration? = null
     private val attached = AtomicBoolean(false)
 
     @Volatile var settings: VrSettings = VrSettings.DEFAULT
@@ -51,54 +62,74 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     private var holdRunnable: Runnable? = null
 
+    /** The bundled Cardboard library contains arm64 native code only and requires GLES 3.0. */
+    fun isSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !Process.is64Bit() ||
+            !Build.SUPPORTED_64_BIT_ABIS.contains("arm64-v8a")
+        ) return false
+        val glVersion = app?.getSystemService(ActivityManager::class.java)
+            ?.deviceConfigurationInfo?.reqGlEsVersion ?: return false
+        return glVersion >= 0x00030000
+    }
+
     fun install(application: Application) {
         if (!attached.compareAndSet(false, true)) return
         app = application
         application.registerActivityLifecycleCallbacks(this)
         reloadFromStore(application)
-        if (enabled && android.os.Build.VERSION.SDK_INT < 24) {
-            Log.w(TAG, "VR requires API 24+; disabling persisted VR flag")
-            enabled = false
-            router.vrEnabled = false
-            VrSettingsStore.save(application, settings.copy(enabled = false))
-        }
         Log.i(TAG, "install: vrEnabled=$enabled")
     }
 
     fun reloadFromStore(context: Context) {
-        settings = VrSettingsStore.load(context)
-        enabled = settings.enabled
-        router.vrEnabled = enabled
-        router.deadZone = settings.gamepadDeadZone
-        router.repeatMs = settings.menuRepeatMs
-        if (!enabled) setPanelOpen(false)
-        refreshHosts()
+        val stored = VrSettingsStore.load(context)
+        val supported = filterUnsupportedSettings(stored)
+        applySettings(supported)
+        if (supported != stored) VrSettingsStore.save(context, supported)
     }
 
     fun updateSettings(context: Context, value: VrSettings) {
-        val clean = value.sanitized()
-        val wasEnabled = enabled
+        val clean = filterUnsupportedSettings(value.sanitized())
+        applySettings(clean)
         VrSettingsStore.save(context, clean)
+    }
+
+    private fun filterUnsupportedSettings(value: VrSettings): VrSettings {
+        if (value.enabled && !isSupported()) return value.copy(enabled = false)
+        val game = activeActivity as? com.limelight.Game
+        if (value.enabled && !enabled && game?.canEnterVrDuringStream() == false) {
+            android.widget.Toast.makeText(game, com.limelight.R.string.vr_restart_stream, android.widget.Toast.LENGTH_LONG).show()
+            return value.copy(enabled = false)
+        }
+        return value
+    }
+
+    private fun applySettings(clean: VrSettings) {
+        if (clean == settings) return
+        val wasEnabled = enabled
         settings = clean
         enabled = clean.enabled
-        if (wasEnabled && !enabled) restoreAllWindows()
         router.vrEnabled = enabled
         router.deadZone = clean.gamepadDeadZone
         router.repeatMs = clean.menuRepeatMs
-        if (!enabled) setPanelOpen(false)
+        if (wasEnabled && !enabled) {
+            setPanelOpen(false)
+            restoreAllWindows()
+        }
         refreshHosts()
         Log.i(TAG, "updateSettings: enabled=$enabled scale=${clean.screenScale}")
     }
 
     fun setEnabled(context: Context, value: Boolean) {
-        if (value && android.os.Build.VERSION.SDK_INT < 24) {
-            Log.w(TAG, "VR requires API 24+ (Cardboard SDK); staying in 2D")
+        if (value && !isSupported()) {
+            Log.w(TAG, "VR requires Android 7.0+, a compatible 64-bit runtime, and OpenGL ES 3.0")
+            return
+        }
+        val game = activeActivity as? com.limelight.Game
+        if (value && !enabled && game?.canEnterVrDuringStream() == false) {
+            android.widget.Toast.makeText(game, com.limelight.R.string.vr_restart_stream, android.widget.Toast.LENGTH_LONG).show()
             return
         }
         updateSettings(context, settings.copy(enabled = value))
-        if (value && settings.recenterOnEnter) {
-            mainHandler.post { onRecenter?.invoke() }
-        }
     }
 
     fun toggle(context: Context) = setEnabled(context, !enabled)
@@ -136,6 +167,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         router.panelOpen = value
         editing = false
         router.editing = false
+        router.resetAxisHold()
+        if (value) (activeActivity as? com.limelight.Game)?.onVrPanelOpened()
         if (!value) selectedIndex = 0
         refreshHosts()
     }
@@ -152,66 +185,80 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         refreshHosts()
     }
 
+    private val backPresses = HashMap<Int, Long>()
+
     /** Returns true when the event was consumed by the VR layer. */
-    fun onKeyEvent(event: KeyEvent): Boolean {
-        // P-E8: several Bluetooth pads report face buttons / D-pad as
-        // SOURCE_KEYBOARD. While VR is on we must NOT gate on source, otherwise
-        // every menu key is handed to the hidden 2D UI and the panel is dead.
-        // The router only emits commands for a small explicit key whitelist, so
-        // letting all sources through is safe. When VR is off we keep the gate
-        // so ordinary keyboards and the 2D UI are untouched.
-        val isGamepad = !enabled || VrGamepadRouter.isGamepad(event.source)
-
-        // P-E2: while VR is on, BACK is owned by the VR layer for BOTH actions.
-        // Acting on DOWN used to let the subsequent UP fall through to the 2D
-        // back stack and finish() the Activity. Only UP performs the action.
-        if (enabled && event.keyCode == VrKeys.BACK) {
-            if (event.action == VrKeys.ACTION_UP) {
-                if (panelOpen) setPanelOpen(false)
-                else setEnabled(app ?: return true, false)
+    fun onKeyEvent(event: KeyEvent, isControllerKey: Boolean, backOwnedByHost: Boolean): Boolean {
+        // A focused Android dialog or controller in Game owns BACK until the VR panel is opened.
+        if (event.keyCode == VrKeys.BACK && (!backOwnedByHost || panelOpen || event.deviceId in backPresses)) {
+            when (event.action) {
+                VrKeys.ACTION_DOWN -> if (enabled) {
+                    if (event.repeatCount == 0) backPresses[event.deviceId] = event.downTime
+                    return true
+                }
+                VrKeys.ACTION_UP -> {
+                    val downTime = backPresses.remove(event.deviceId)
+                    if (downTime != null) {
+                        if (downTime == event.downTime && !event.isCanceled) onBackInvoked()
+                        return true
+                    }
+                    if (enabled) return true
+                }
             }
-            return true
         }
-
-        val command = router.onKey(event.keyCode, event.action, isGamepad)
-        return handle(command)
+        return handle(router.onKey(event.keyCode, event.action, isControllerKey,
+            event.deviceId, event.repeatCount > 0))
     }
 
-    fun onUiNavigation(x: Float, y: Float, hatY: Float, timeMs: Long): Boolean =
-        router.onUiNavigation(x, y, hatY, timeMs)
+    fun onBackInvoked(): Boolean {
+        if (!enabled) return false
+        if (panelOpen) setPanelOpen(false)
+        else setEnabled(app ?: return true, false)
+        return true
+    }
+
+    fun onUiNavigation(x: Float, y: Float, hatX: Float, hatY: Float, timeMs: Long): Boolean =
+        router.onUiNavigation(x, y, hatX, hatY, timeMs)
 
     fun drainNavDirection(): Int = router.drainNavDirection()
 
-    /**
-     * Dialogs own a separate Window, so decor.draw() on the Activity cannot see
-     * them. Screens that open a Dialog register its decor here; the capture then
-     * draws it on top of the Activity decor. Weakly referenced and cleared when
-     * the Dialog is dismissed (detected by isShowing / attached state).
-     */
-    private val dialogDecors = java.util.concurrent.CopyOnWriteArrayList<java.lang.ref.WeakReference<View>>()
+    private data class DialogWindow(val owner: WeakReference<Activity>, val decor: WeakReference<View>)
+    private val dialogDecors = ArrayList<DialogWindow>()
 
-    fun registerDialogDecor(decor: View?) {
-        if (decor == null) return
-        dialogDecors.removeAll { it.get() == null || it.get() === decor }
-        dialogDecors.add(java.lang.ref.WeakReference(decor))
+    /** Install the input hook in the actual focused Window and register the decor for capture. */
+    fun registerDialog(dialog: Dialog) {
+        val window = dialog.window ?: return
+        val owner = dialog.ownerActivity ?: findActivity(dialog.context) ?: return
+        val decor = window.decorView
+        if (window.callback !is VrActivityHooks) {
+            window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true)
+        }
+        dialogDecors.removeAll { it.decor.get() == null || it.owner.get() == null || it.decor.get() === decor }
+        dialogDecors.add(DialogWindow(WeakReference(owner), WeakReference(decor)))
         onWindowDirty?.invoke()
     }
 
-    fun activeDialogDecors(): List<View> = dialogDecors.mapNotNull { ref ->
-        ref.get()?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
+    fun activeDialogDecors(source: View): List<View> = dialogDecors.mapNotNull { entry ->
+        if (entry.owner.get()?.window?.decorView !== source) return@mapNotNull null
+        entry.decor.get()?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
+    }
+
+    private fun findActivity(context: Context): Activity? = when (context) {
+        is Activity -> context
+        is ContextWrapper -> context.baseContext?.takeIf { it !== context }?.let(::findActivity)
+        else -> null
     }
 
     /** Returns true when the motion event was consumed by the VR layer. */
     fun onMotionEvent(event: MotionEvent): Boolean {
         if (!enabled || !panelOpen) return false
-        val hat = router.onHat(event.getAxisValue(VrKeys.AXIS_HAT_Y))
-        val axis = router.onAxis(
+        val hat = router.onHat(event.getAxisValue(VrKeys.AXIS_HAT_X), event.getAxisValue(VrKeys.AXIS_HAT_Y))
+        if (hat is VrGamepadRouter.Command.Move || hat is VrGamepadRouter.Command.Adjust) return handle(hat)
+        return handle(router.onAxis(
             event.getAxisValue(VrKeys.AXIS_X),
             event.getAxisValue(VrKeys.AXIS_Y),
             event.eventTime,
-        )
-        val command = if (hat is VrGamepadRouter.Command.Move) hat else axis
-        return handle(command)
+        ))
     }
 
     private fun handle(command: VrGamepadRouter.Command): Boolean {
@@ -291,14 +338,56 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun refreshHosts() {
-        hosts.values.forEach { it.onStateChanged() }
+        val activity = activeActivity ?: return
+        if (enabled) {
+            if (activeHost == null) {
+                val decor = activity.window.decorView as? ViewGroup ?: return
+                val host = VrOverlayHost(activity, decor)
+                host.install()
+                activeHost = host
+                applyImmersive(activity)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && systemBackRegistration == null) {
+                systemBackRegistration = SystemBackRegistration(activity)
+            }
+        } else {
+            releaseActiveHost()
+        }
         bindActiveCallbacks()
         onWindowDirty?.invoke()
+    }
+
+    private fun releaseActiveHost() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            systemBackRegistration?.unregister()
+        }
+        systemBackRegistration = null
+        activeHost?.release()
+        activeHost = null
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private class SystemBackRegistration(activity: Activity) {
+        private val dispatcher = activity.onBackInvokedDispatcher
+        private val callback = OnBackInvokedCallback { onBackInvoked() }
+
+        init {
+            dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_OVERLAY, callback)
+        }
+
+        fun unregister() = dispatcher.unregisterOnBackInvokedCallback(callback)
     }
 
     private fun cancelHold() {
         holdRunnable?.let { mainHandler.removeCallbacks(it) }
         holdRunnable = null
+    }
+
+    private fun cancelPendingInput() {
+        cancelHold()
+        backPresses.clear()
+        router.reset()
+        tapCancelled = true
     }
 
     // ---- ActivityLifecycleCallbacks: attach an overlay to every screen ----
@@ -311,30 +400,20 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    override fun onActivityStarted(activity: Activity) {
-        if (hosts.containsKey(activity)) return
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        val host = VrOverlayHost(activity, decor)
-        hosts[activity] = host
-        host.onStateChanged()
-        Log.i(TAG, "attach overlay: ${activity.javaClass.simpleName}")
-    }
+    override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
+        if (activeActivity !== activity) releaseActiveHost()
         activeActivity = activity
-        bindActiveCallbacks()
-        hosts[activity]?.onStateChanged()
-        applyImmersive(activity)
+        refreshHosts()
     }
 
     override fun onActivityPaused(activity: Activity) {
-        // Do NOT guess the next Activity here: during a transition the guessed
-        // host may still be paused/background. onActivityResumed binds the real
-        // top-resumed Activity; meanwhile keep no stale GL callbacks.
         if (activeActivity === activity) {
+            cancelPendingInput()
             activeActivity = null
-            onRecenter = null
-            onWindowDirty = null
+            releaseActiveHost()
+            bindActiveCallbacks()
         }
     }
 
@@ -342,29 +421,23 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-    /** Only the topmost Activity owns the GL callbacks; others keep a passive overlay. */
+    /** Only the resumed Activity owns a projection and its GL callbacks. */
     private fun bindActiveCallbacks() {
-        val host = activeActivity?.let { hosts[it] }
+        val host = activeHost
         onRecenter = host?.let { { it.theaterView()?.recenter() } }
         onWindowDirty = host?.let { { it.theaterView()?.markDirty() } }
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        hosts.remove(activity)?.release()
+        onActivityPaused(activity)
         windowStates.remove(activity)
-        if (activeActivity === activity) {
-            activeActivity = null
-            onRecenter = null
-            onWindowDirty = null
-        }
-        if (hosts.isEmpty()) cancelHold()
     }
 
-    /** Original per-Activity window state, restored verbatim when VR is turned off. */
+    /** Per-Activity window settings changed by VR. */
     private data class WindowState(
         val uiVisibility: Int,
         val keepScreenOn: Boolean,
-        val orientation: Int,
+        val orientation: Int?,
         val layoutNoLimits: Boolean,
         val cutoutMode: Int?,
     )
@@ -382,20 +455,29 @@ object VrSession : Application.ActivityLifecycleCallbacks {
             WindowState(
                 uiVisibility = window.decorView.systemUiVisibility,
                 keepScreenOn = (attrs.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0,
-                orientation = activity.requestedOrientation,
+                orientation = null,
                 layoutNoLimits = (attrs.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) != 0,
                 cutoutMode = if (android.os.Build.VERSION.SDK_INT >= 28)
                     attrs.layoutInDisplayCutoutMode else null,
             )
         }
-        // P-D9: hiding the system bars alone is NOT fullscreen. Force landscape,
-        // let decor content extend under the status bar / gesture area / notch.
-        activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Android 8.0 rejects orientation requests from floating or translucent Activities.
+        // Multi-window hosts already follow the display orientation.
+        if (!activity.isInMultiWindowMode && !activity.hasFloatingOrTranslucentWindow()) {
+            val state = windowStates.getValue(activity)
+            if (state.orientation == null) {
+                windowStates[activity] = state.copy(orientation = activity.requestedOrientation)
+            }
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             window.attributes = window.attributes.also {
-                it.layoutInDisplayCutoutMode =
+                it.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
             }
         }
         @Suppress("DEPRECATION")
@@ -414,13 +496,15 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val state = windowStates.remove(activity) ?: return
         @Suppress("DEPRECATION")
         activity.window.decorView.systemUiVisibility = state.uiVisibility
-        activity.requestedOrientation = state.orientation
-        if (!state.keepScreenOn) {
-            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-        if (!state.layoutNoLimits) {
-            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-        }
+        state.orientation?.let { activity.requestedOrientation = it }
+        activity.window.setFlags(
+            if (state.keepScreenOn) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0,
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+        )
+        activity.window.setFlags(
+            if (state.layoutNoLimits) WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS else 0,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        )
         val cutout = state.cutoutMode
         if (android.os.Build.VERSION.SDK_INT >= 28 && cutout != null) {
             activity.window.attributes = activity.window.attributes.also {
@@ -429,8 +513,17 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    /** Called from updateSettings when the VR flag transitions to off. */
+    /** Restore any activity that had a VR overlay in this session. */
     private fun restoreAllWindows() {
         windowStates.keys.toList().forEach(::restoreWindow)
+    }
+
+    private fun Activity.hasFloatingOrTranslucentWindow(): Boolean {
+        val flags = obtainStyledAttributes(intArrayOf(android.R.attr.windowIsFloating, android.R.attr.windowIsTranslucent))
+        return try {
+            flags.getBoolean(0, false) || flags.getBoolean(1, false)
+        } finally {
+            flags.recycle()
+        }
     }
 }

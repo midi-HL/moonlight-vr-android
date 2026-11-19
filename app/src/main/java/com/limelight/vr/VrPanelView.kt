@@ -5,110 +5,160 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.text.TextPaint
+import android.text.TextUtils
 import android.view.View
-import kotlin.math.roundToInt
+import androidx.core.content.ContextCompat
+import com.limelight.R
 
-/**
- * In-VR quick settings panel. Deliberately NOT attached to the window: it is
- * laid out manually and drawn into the same offscreen Canvas as the decor by
- * [VrWindowCapture], so it appears in BOTH eyes without a second GL surface.
- * The rows and values come from [VrQuickPanel] / [VrSession], i.e. the same
- * SharedPreferences the 2D StreamSettings page edits.
- */
+/** Draws the controller menu onto its own head-relative stereo layer. */
 class VrPanelView(context: Context) : View(context) {
-    private val card = RectF()
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(232, 14, 18, 28) }
-    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(255, 90, 150, 220); style = Paint.Style.STROKE; strokeWidth = 3f
-    }
-    private val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE; textSize = 34f; isFakeBoldText = true
-    }
-    private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 235, 242, 255); textSize = 28f }
-    private val value = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 120, 205, 255); textSize = 28f }
-    private val hint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(170, 190, 205, 225); textSize = 22f }
-    private val selected = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(90, 70, 140, 220) }
-    private val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 90, 190, 255) }
-    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(90, 255, 255, 255) }
-
-    var widthPx = 1280
-    var heightPx = 720
+    private val shape = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val text = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val regular = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val icon = ContextCompat.getDrawable(context, R.drawable.ic_vr_headset)?.mutate()
+    private var widthPx = 1024
+    private var heightPx = 576
 
     fun layoutFor(w: Int, h: Int) {
         widthPx = w
         heightPx = h
-        val cw = (w * 0.82f).coerceAtMost(1100f)
-        val ch = (h * 0.84f).coerceAtMost(620f)
-        card.set((w - cw) / 2f, (h - ch) / 2f, (w + cw) / 2f, (h + ch) / 2f)
     }
 
-    /** Draws the panel into an already-translated Canvas of size widthPx x heightPx. */
     fun drawInto(canvas: Canvas, settings: VrSettings, selectedIndex: Int, editing: Boolean) {
-        canvas.drawRoundRect(card, 28f, 28f, bg)
-        canvas.drawRoundRect(card, 28f, 28f, stroke)
+        val save = canvas.save()
+        canvas.scale(widthPx / 1024f, heightPx / 576f)
+        round(canvas, 142f, 18f, 882f, 558f, 30f, surface)
+        round(canvas, 170f, 44f, 226f, 100f, 16f, focusFill)
+        icon?.apply {
+            setTint(accent)
+            setBounds(181, 55, 215, 89)
+            draw(canvas)
+        }
+        line(canvas, context.getString(R.string.vr_panel_title), 244f, 79f, 450f, 35f, foreground, true)
+        val index = selectedIndex.coerceIn(VrQuickPanel.rows.indices)
+        val window = VrQuickPanel.visibleWindowFor(index, 6)
+        val section = context.getString(sectionLabel(VrQuickPanel.rows[index].key))
+        line(canvas, section, 174f, 137f, 520f, 20f, secondary, true)
+        val page = context.getString(R.string.vr_panel_position, index + 1, VrQuickPanel.rows.size)
+        right(canvas, page, 842f, 137f, 19f, secondary)
 
-        var y = card.top + 58f
-        canvas.drawText("VR 快捷设置", card.left + 44f, y, title)
-        canvas.drawText("长按 START+SELECT 或 MODE 开关 · D-pad 选择 · A 确认/编辑 · 摇杆调值 · B 关闭",
-            card.left + 44f, y + 34f, hint)
-
-        y += 78f
-        val rows = VrQuickPanel.rows
-        val footerRoom = 40f
-        val visibleRows = (((card.bottom - footerRoom - y) / 46f).toInt())
-            .coerceIn(1, VrQuickPanel.VISIBLE_ROWS)
-        val window = VrQuickPanel.visibleWindowFor(selectedIndex, visibleRows)
-        for (i in window) {
-            val row = rows[i]
-            val rowTop = y - 34f
-            val rowBottom = y + 12f
-            if (i == selectedIndex) {
-                canvas.drawRoundRect(
-                    RectF(card.left + 24f, rowTop, card.right - 24f, rowBottom), 12f, 12f, selected,
-                )
+        window.forEachIndexed { offset, i ->
+            val row = VrQuickPanel.rows[i]
+            val y = 151f + offset * 54f
+            val selected = i == index
+            val isEditing = selected && editing && row.kind == VrQuickPanel.Kind.RANGE
+            if (selected) {
+                round(canvas, 166f, y, 848f, y + 49f, 15f, if (isEditing) editingFill else focusFill)
+                round(canvas, 174f, y + 10f, 180f, y + 39f, 3f, accent)
             }
-            val mark = if (i == selectedIndex) "▶ " else "   "
-            canvas.drawText(mark + row.label, card.left + 44f, y, body)
-            val right = when (row.kind) {
+            val label = context.getString(rowLabel(row.key))
+            val current = VrQuickPanel.valueOf(settings, row.key)
+            val color = if (row.key == "vr_exit") exitAccent else foreground
+            line(canvas, label, 192f, y + 33f, if (row.kind == VrQuickPanel.Kind.RANGE) 390f else 465f,
+                24f, color, selected)
+            when (row.kind) {
                 VrQuickPanel.Kind.RANGE -> {
-                    val fraction = ((VrQuickPanel.valueOf(settings, row.key) - row.min) / (row.max - row.min))
-                        .coerceIn(0f, 1f)
-                    val barLeft = card.right - 330f
-                    val barRight = card.right - 150f
-                    canvas.drawRoundRect(RectF(barLeft, y - 12f, barRight, y - 4f), 4f, 4f, track)
-                    canvas.drawRoundRect(RectF(barLeft, y - 12f, barLeft + (barRight - barLeft) * fraction, y - 4f),
-                        4f, 4f, bar)
-                    (if (editing && i == selectedIndex) "[ " else "") +
-                        row.format(VrQuickPanel.valueOf(settings, row.key)) +
-                        (if (editing && i == selectedIndex) " ]" else "")
+                    val fraction = ((current - row.min) / (row.max - row.min)).coerceIn(0f, 1f)
+                    round(canvas, 594f, y + 21f, 715f, y + 28f, 3.5f, track)
+                    if (fraction > 0f) round(canvas, 594f, y + 21f, 594f + fraction * 121f, y + 28f, 3.5f, accent)
+                    round(canvas, 731f, y + 7f, 834f, y + 42f, 10f, if (isEditing) accent else chip)
+                    right(canvas, row.format(current), 823f, y + 32f, 20f, if (isEditing) surface else foreground, true)
                 }
-                VrQuickPanel.Kind.TOGGLE ->
-                    if (VrQuickPanel.valueOf(settings, row.key) >= 0.5f) "开" else "关"
-                VrQuickPanel.Kind.ACTION -> "执行"
+                VrQuickPanel.Kind.TOGGLE -> {
+                    val on = current >= 0.5f
+                    val state = context.getString(if (on) R.string.vr_panel_on else R.string.vr_panel_off)
+                    right(canvas, state, 761f, y + 32f, 19f, secondary)
+                    round(canvas, 773f, y + 12f, 832f, y + 38f, 13f, if (on) accent else track)
+                    shape.color = if (on) surface else secondary
+                    canvas.drawCircle(if (on) 818f else 787f, y + 25f, 9f, shape)
+                }
+                VrQuickPanel.Kind.ACTION -> {
+                    right(canvas, "A", 818f, y + 33f, 23f, if (selected) accent else secondary, true)
+                }
             }
-            canvas.drawText(right, card.right - 44f - value.measureText(right), y, value)
-            y += 46f
         }
 
-        // P-F1: explicit scroll affordance so rows beyond the visible window are
-        // discoverable instead of silently clipped.
-        if (rows.size > visibleRows) {
-            val trackTop = card.top + 136f
-            val trackBottom = card.bottom - footerRoom
-            val trackX = card.right - 18f
-            canvas.drawRoundRect(RectF(trackX - 3f, trackTop, trackX + 3f, trackBottom), 3f, 3f, track)
-            val thumbH = (trackBottom - trackTop) * visibleRows / rows.size
-            val thumbTop = trackTop + (trackBottom - trackTop - thumbH) *
-                window.first / (rows.size - visibleRows).coerceAtLeast(1)
-            canvas.drawRoundRect(RectF(trackX - 5f, thumbTop, trackX + 5f, thumbTop + thumbH), 5f, 5f, bar)
+        val marks = VrQuickPanel.rows.size - window.count()
+        if (marks > 0) {
+            val height = 312f
+            val thumb = height * window.count() / VrQuickPanel.rows.size
+            val y = 153f + (height - thumb) * window.first / marks
+            round(canvas, 858f, 153f, 862f, 465f, 2f, track)
+            round(canvas, 858f, y, 862f, y + thumb, 2f, accent)
         }
-        val footer = "${window.first + 1}-${window.last + 1}/${rows.size}  ·  " +
-            "修改即时生效，无需退出串流"
-        canvas.drawText(footer, card.left + 44f, card.bottom - 28f, hint)
+        rule(canvas, 169f, 488f, 855f)
+        val hint = if (editing) R.string.vr_panel_edit_hint else R.string.vr_panel_hint
+        line(canvas, context.getString(hint), 174f, 527f, 672f, 21f, secondary, true)
+        canvas.restoreToCount(save)
     }
 
-    @Deprecated("Use drawInto; this View is never attached to a window.")
-    override fun draw(canvas: Canvas) {
-        drawInto(canvas, VrSession.settings, VrSession.selectedIndex, VrSession.editing)
+    private fun sectionLabel(key: String): Int = when (key) {
+        VrSettingsStore.K_HEAD, VrSettingsStore.K_HEAD_SENS, VrSettingsStore.K_IPD, VrSettingsStore.K_RECENTER ->
+            R.string.vr_panel_tracking
+        VrSettingsStore.K_DEAD_ZONE, VrSettingsStore.K_REPEAT -> R.string.vr_panel_controller
+        "vr_recenter_now", "vr_exit", VrSettingsStore.K_ENABLED -> R.string.vr_panel_session
+        else -> R.string.vr_panel_display
+    }
+
+    private fun rowLabel(key: String): Int = when (key) {
+        VrSettingsStore.K_ENABLED -> R.string.title_vr_enabled
+        VrSettingsStore.K_SCALE -> R.string.title_vr_scale
+        VrSettingsStore.K_DISTANCE -> R.string.title_vr_distance
+        VrSettingsStore.K_BRIGHTNESS -> R.string.title_vr_brightness
+        VrSettingsStore.K_CURVATURE -> R.string.title_vr_curvature
+        VrSettingsStore.K_HEAD -> R.string.title_vr_head_tracking
+        VrSettingsStore.K_HEAD_SENS -> R.string.title_vr_head_sensitivity
+        VrSettingsStore.K_IPD -> R.string.title_vr_ipd
+        VrSettingsStore.K_DEAD_ZONE -> R.string.title_vr_dead_zone
+        VrSettingsStore.K_REPEAT -> R.string.title_vr_repeat
+        VrSettingsStore.K_RECENTER -> R.string.title_vr_recenter_on_enter
+        VrSettingsStore.K_ZOOM -> R.string.vr_panel_zoom
+        VrSettingsStore.K_V_FLIP -> R.string.title_vr_vertical_flip
+        VrSettingsStore.K_ALIGN_LINE -> R.string.title_vr_align_line
+        "vr_recenter_now" -> R.string.vr_panel_recenter
+        "vr_exit" -> R.string.vr_panel_exit
+        else -> R.string.vr_panel_title
+    }
+
+    private fun round(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float, radius: Float, color: Int) {
+        shape.color = color
+        canvas.drawRoundRect(left, top, right, bottom, radius, radius, shape)
+    }
+
+    private fun rule(canvas: Canvas, x: Float, y: Float, right: Float) {
+        shape.color = track
+        canvas.drawRect(x, y, right, y + 1f, shape)
+    }
+
+    private fun textStyle(fontSize: Float, color: Int, strong: Boolean) {
+        text.typeface = if (strong) medium else regular
+        text.textSize = fontSize
+        text.color = color
+    }
+
+    private fun line(canvas: Canvas, label: String, x: Float, y: Float, maxWidth: Float, size: Float,
+                     color: Int, strong: Boolean = false) {
+        textStyle(size, color, strong)
+        canvas.drawText(TextUtils.ellipsize(label, text, maxWidth, TextUtils.TruncateAt.END).toString(), x, y, text)
+    }
+
+    private fun right(canvas: Canvas, label: String, x: Float, y: Float, size: Float, color: Int, strong: Boolean = false) {
+        textStyle(size, color, strong)
+        canvas.drawText(label, x - text.measureText(label), y, text)
+    }
+
+    private companion object {
+        val surface = Color.rgb(17, 22, 31)
+        val focusFill = Color.rgb(37, 52, 66)
+        val editingFill = Color.rgb(38, 61, 67)
+        val foreground = Color.rgb(246, 249, 252)
+        val secondary = Color.rgb(181, 198, 214)
+        val accent = Color.rgb(142, 235, 211)
+        val exitAccent = Color.rgb(255, 191, 185)
+        val track = Color.rgb(66, 83, 98)
+        val chip = Color.rgb(44, 59, 72)
     }
 }

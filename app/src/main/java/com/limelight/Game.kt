@@ -799,11 +799,22 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             .getBoolean("checkbox_resume_stream", false)
 
     private fun shouldUseFramegen(prefs: SharedPreferences = defaultPreferences()): Boolean =
-        prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE &&
+        !com.limelight.vr.VrSession.enabled &&
+            prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE &&
             FramegenRuntimePlanner.shouldUse(prefs, prefConfig.width, prefConfig.height, prefConfig.fps)
 
     private fun framegenPresentationFps(prefs: SharedPreferences = defaultPreferences()): Int =
-        FramegenRuntimePlanner.presentationFps(prefs, prefConfig.fps)
+        if (com.limelight.vr.VrSession.enabled) prefConfig.fps
+        else FramegenRuntimePlanner.presentationFps(prefs, prefConfig.fps)
+
+    /** A running stream cannot renegotiate its output stack without a reconnect. */
+    internal fun canEnterVrDuringStream(): Boolean =
+        ::prefConfig.isInitialized && (
+            !negotiatedHdrEnabled && framegenCapture == null &&
+                externalDisplayManager?.isUsingExternalDisplay() != true &&
+                decoderRenderer?.getActiveVideoFormat() != MoonBridge.VIDEO_FORMAT_PYROWAVE &&
+                (connected || prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE)
+            )
 
     private fun defaultPreferences(): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(this)
@@ -892,7 +903,10 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     private fun prepareExternalDisplay() {
         externalDisplayManager?.cleanup()
         externalStreamView = null
-        val manager = ExternalDisplayManager(this, prefConfig, targetDisplayResolver)
+        val displayPrefs = if (com.limelight.vr.VrSession.enabled) {
+            prefConfig.copy().apply { useExternalDisplay = false }
+        } else prefConfig
+        val manager = ExternalDisplayManager(this, displayPrefs, targetDisplayResolver)
         externalDisplayManager = manager
         // Input and Surface callbacks need the new connection and touch contexts first.
         manager.initialize()
@@ -938,7 +952,8 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         displayName: String?
     ): StreamConfigResult {
         val glPrefs = GlPreferences.readPreferences(this)
-        val forcePyrowave =
+        val vrPlayback = com.limelight.vr.VrSession.enabled
+        val forcePyrowave = !vrPlayback &&
             prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_PYROWAVE
         // PyroWave consumes HDR10+/Dolby Vision frame metadata in its Vulkan
         // presentation shader. Vivid is offered only when the native Vulkan
@@ -956,7 +971,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         }
         val connMgr = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val displayHdrMode = if (pyrowaveSelected) HdrModePolicy.toProtocolMode(prefConfig.hdrMode) else prefConfig.hdrMode
-        val acceptableHdrTypes = if (prefConfig.enableHdr &&
+        val acceptableHdrTypes = if (!vrPlayback && prefConfig.enableHdr &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
         ) {
             when (displayHdrMode) {
@@ -985,7 +1000,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         )
 
         var willStreamHdr = false
-        if (prefConfig.enableHdr) {
+        if (!vrPlayback && prefConfig.enableHdr) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 willStreamHdr = when (displayHdrMode) {
                     MoonBridge.HDR_MODE_HLG -> hdrTypeSupport.hasHlg
@@ -1013,7 +1028,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
         // HDR10+ metadata cannot survive the ImageReader/frame-generation path yet. Keep that
         // path on static HDR10 until frame generation explicitly supports dynamic metadata.
-        val framegenRequested = framegenRequestedByPreference && !pyrowaveSelected
+        val framegenRequested = !vrPlayback && framegenRequestedByPreference && !pyrowaveSelected
         val hdr10PlusRequested = !pyrowaveSelected && HdrModePolicy.shouldRequestHdr10Plus(
             hdrEnabled = willStreamHdr,
             hdrMode = prefConfig.hdrMode,
@@ -1058,8 +1073,11 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             // discarded during a reconnect. Keep its identity so a stale
             // PyroWave worker cannot terminate the next connection.
             var rendererForFailure: MediaCodecDecoderRenderer? = null
+            val decoderPrefs = if (vrPlayback && prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_PYROWAVE) {
+                prefConfig.copy().apply { videoFormat = PreferenceConfiguration.FormatOption.AUTO }
+            } else prefConfig
             val newRenderer = MediaCodecDecoderRenderer(
-                this, prefConfig,
+                this, decoderPrefs,
                 {
                     if (decoderRenderer === rendererForFailure) {
                         onActiveRendererFailure()
@@ -1969,8 +1987,14 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         super.onPause()
     }
 
+    internal fun hasNativeGameMenu(): Boolean = activeGameMenu?.isShowing() == true
+
+    internal fun onVrPanelOpened() {
+        if (!hasNativeGameMenu() && ::controllerHandler.isInitialized) controllerHandler.onVrPanelOpened()
+    }
+
     private fun updateKeyboardInterception() {
-        val overlayVisible = activeGameMenu?.isShowing() == true || Dialog.hasVisibleDialog() ||
+        val overlayVisible = hasNativeGameMenu() || Dialog.hasVisibleDialog() ||
             hostUnlockController?.isOverlayVisible == true
         val intercepting = streamInForeground && !overlayVisible
         if (!intercepting && KeyboardAccessibilityService.interceptingEnabled) {
@@ -2923,6 +2947,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
     private fun prepareFramegenSurface(outputSurface: Surface, showEnabledToast: Boolean) {
         releaseFramegenCapture()
+        if (!shouldUseFramegen()) return
 
         val config = FramegenRuntimePlanner.configForStream(
             defaultPreferences(),

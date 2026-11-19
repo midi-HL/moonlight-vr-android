@@ -2,7 +2,6 @@ package com.limelight.vr
 
 import android.app.Activity
 import android.util.Log
-import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 
@@ -21,22 +20,10 @@ class VrOverlayHost(private val activity: Activity, private val decor: ViewGroup
     companion object { private const val TAG = "VrOverlayHost" }
 
     private var theaterView: VrTheaterView? = null
-    private var installed = false
-
     fun theaterView(): VrTheaterView? = theaterView
-    val captureSource: View get() = decor
 
-    fun onStateChanged() {
-        if (!VrSession.enabled) {
-            uninstall()
-            return
-        }
-        install()
-        theaterView?.markDirty()
-    }
-
-    private fun install() {
-        if (installed) return
+    fun install() {
+        if (theaterView != null) return
         val theater = VrTheaterView(activity, decor, activity is com.limelight.Game)
         theaterView = theater
         decor.addView(theater, FrameLayout.LayoutParams(
@@ -44,20 +31,15 @@ class VrOverlayHost(private val activity: Activity, private val decor: ViewGroup
             ViewGroup.LayoutParams.MATCH_PARENT,
         ))
         theater.bringToFront()
-        installed = true
         Log.i(TAG, "install on ${activity.javaClass.simpleName}")
     }
 
-    private fun uninstall() {
-        if (!installed) return
-        val view = theaterView
-        (view?.parent as? ViewGroup)?.removeView(view)
-        view?.stop()
-        view?.release()
+    fun release() {
+        val view = theaterView ?: return
         theaterView = null
-        installed = false
-        Log.i(TAG, "uninstall from ${activity.javaClass.simpleName}")
+        // Removing the view stops the GL thread. Release VR resources while it is still attached.
+        view.release()
+        (view.parent as? ViewGroup)?.removeView(view)
+        Log.i(TAG, "released from ${activity.javaClass.simpleName}")
     }
-
-    fun release() = uninstall()
 }

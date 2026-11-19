@@ -3481,6 +3481,32 @@ class ControllerHandler(
         }
     }
 
+    /** Neutralize Android-delivered controller axes when the VR panel takes their motion events. */
+    internal fun onVrPanelOpened() {
+        for (context in inputDeviceContextSnapshot) {
+            if (!isContextUsable(context) || !context.assignedControllerNumber) continue
+            resetSystemStartGesture(context)
+            context.leftStickX = 0
+            context.leftStickY = 0
+            context.rightStickX = 0
+            context.rightStickY = 0
+            context.physRightStickX = 0
+            context.physRightStickY = 0
+            context.leftTrigger = 0
+            context.rightTrigger = 0
+            // Preserve keys until their matching UP reaches Game, but clear HAT directions.
+            if (context.hatXAxisUsed) {
+                context.inputMap = context.inputMap and
+                    (ControllerPacket.LEFT_FLAG or ControllerPacket.RIGHT_FLAG).inv()
+            }
+            if (context.hatYAxisUsed) {
+                context.inputMap = context.inputMap and
+                    (ControllerPacket.UP_FLAG or ControllerPacket.DOWN_FLAG).inv()
+            }
+            sendNeutralControllerState(context)
+        }
+    }
+
     fun onExternalGameMenuDismissed() {
         synchronized(driverControllerContextsLifecycleLock) {
             if (stopped) return

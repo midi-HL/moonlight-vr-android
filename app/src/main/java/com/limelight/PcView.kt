@@ -677,19 +677,20 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
      * impossible to hit while wearing the headset (OpenNOW-VR P-F2 / §15.5).
      */
     private fun installVrEntryButton() {
+        if (!com.limelight.vr.VrSession.isSupported()) return
         val root = findViewById<android.view.ViewGroup>(android.R.id.content) ?: return
         if (root.findViewWithTag<View>(VR_BUTTON_TAG) != null) return
         val button = android.widget.Button(this).apply {
             tag = VR_BUTTON_TAG
-            text = "进入 VR"
+            setText(R.string.vr_enter)
             isAllCaps = false
             textSize = 16f
             setTextColor(android.graphics.Color.WHITE)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(android.graphics.Color.argb(225, 30, 110, 180))
-                cornerRadius = dpToPx(18).toFloat()
-            }
-            setPadding(dpToPx(22), dpToPx(10), dpToPx(22), dpToPx(10))
+            setBackgroundResource(R.drawable.vr_entry_background)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_vr_headset, 0, 0, 0)
+            compoundDrawablePadding = dpToPx(9)
+            minHeight = dpToPx(48)
+            setPadding(dpToPx(19), dpToPx(8), dpToPx(19), dpToPx(8))
             // Centre-bottom: visible in both eyes, away from the top-left lens crop
             // and away from the existing toolbar buttons.
             layoutParams = android.widget.FrameLayout.LayoutParams(

@@ -23,6 +23,8 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
     val panelView = VrPanelView(context)
     private val capture = VrWindowCapture(decor, panelView, isVideoHost)
     private val renderer = VrTheaterRenderer(capture, isVideoHost)
+    private var resumed = false
+    private var released = false
 
     init {
         promoteGlSurface()
@@ -35,6 +37,8 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
                 removeOnAttachStateChangeListener(this)
                 Log.i(TAG, "attached: onResume")
                 onResume()
+                resumed = true
+                capture.markDirty()
             }
             override fun onViewDetachedFromWindow(v: View) = Unit
         })
@@ -59,28 +63,35 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
     }
 
     fun markDirty() {
-        capture.markDirty()
-        renderer.markMeshDirty()
+        if (!released && resumed) capture.markDirty()
     }
 
     /** Marshalled onto the GL thread so head-pose state is not read concurrently. */
     fun recenter() = queueEvent { renderer.recenter() }
 
-    fun stop() {
-        Log.i(TAG, "stop: onPause")
-        onPause()
-    }
-
     fun release() {
+        if (released) return
+        released = true
         Log.i(TAG, "release: onDestroy")
         capture.stop()
-        queueEvent { renderer.release() }
+        shutdownCalled()
+        if (resumed) {
+            queueEvent { renderer.release() }
+            onPause()
+            resumed = false
+        }
         onDestroy()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         hideTouchOverlay()
+    }
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        // A bitmap capture must not include Cardboard or punch its SurfaceView
+        // hole through the captured Android UI. Keep the real Surface visible.
+        if (canvas.isHardwareAccelerated) super.draw(canvas)
     }
 
     override fun onDetachedFromWindow() {

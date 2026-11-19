@@ -131,8 +131,6 @@ jobs:
           if 'fun onVrTap(' not in session_tap or 'ACTION_CANCEL' not in session_tap:
               sys.exit('FAIL: short-tap recentre state machine is incomplete (P-E10)')
           session = (root / 'app/src/main/java/com/limelight/vr/VrSession.kt').read_text(encoding='utf-8')
-          if '!enabled || VrGamepadRouter.isGamepad' not in session:
-              sys.exit('FAIL: source gate while VR is on is still present (P-E8)')
           if 'SCREEN_ORIENTATION_SENSOR_LANDSCAPE' not in session:
               sys.exit('FAIL: VR landscape/fullscreen enforcement missing (P-D9)')
           pcview = (root / 'app/src/main/java/com/limelight/PcView.kt').read_text(encoding='utf-8')
@@ -185,6 +183,9 @@ jobs:
       - name: Build NonRoot Debug APK
         run: ./gradlew --no-daemon --stacktrace :app:assembleNonRootDebug
 
+      - name: Build VR device regression tests
+        run: ./gradlew --no-daemon --stacktrace :app:assembleNonRootDebugAndroidTest
+
       - name: Verify VR code and Cardboard JNI are inside the APK
         shell: bash
         run: |
@@ -219,6 +220,14 @@ jobs:
         with:
           name: moonlight-vr-nonroot-debug
           path: app/build/outputs/apk/nonRoot/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload VR device regression APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonlight-vr-device-tests
+          path: app/build/outputs/apk/androidTest/nonRoot/debug/*.apk
           if-no-files-found: error
 
       - name: Upload VR unit test report

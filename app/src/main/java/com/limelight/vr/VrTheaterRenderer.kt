@@ -18,11 +18,10 @@ import javax.microedition.khronos.egl.EGLConfig
 /**
  * Stereo renderer for the whole-window projection.
  *
- * One flat quad carries the captured Activity window (home page, settings,
- * dialogs and quick panel) as GL_TEXTURE_2D. When a stream is running its
- * frames arrive through a SurfaceTexture (GL_TEXTURE_EXTERNAL_OES) which is
- * drawn first; the window bitmap is then alpha-blended on top so overlays,
- * dialogs and the quick settings panel stay visible over the game picture.
+ * A screen mesh carries the captured Activity window and its dialogs. When a stream is running its
+ * frames arrive through a SurfaceTexture (GL_TEXTURE_EXTERNAL_OES).
+ * The window bitmap blends over the video. The quick settings panel is a separate flat layer
+ * fixed relative to the headset, so its controls stay readable while the screen changes.
  *
  * Both eyes sample the SAME quads from slightly different viewpoints — ordinary
  * stereo of a virtual screen, not SBS 3D video. Head pose only changes the view
@@ -34,6 +33,9 @@ class VrTheaterRenderer(
 ) : CardboardView.Renderer {
     companion object {
         private const val TAG = "VrTheaterRenderer"
+        private const val QUICK_PANEL_DISTANCE = 1.55f
+        private const val QUICK_PANEL_SCALE = 0.78f
+        private const val MAX_ZOOM_READBACK_BYTES = 32L * 1024 * 1024
         private const val VERTEX_SHADER = """
             attribute vec4 aPosition;
             attribute vec2 aTexCoord;
@@ -82,6 +84,7 @@ class VrTheaterRenderer(
     private var panel: Handles? = null
     private var video: Handles? = null
     private var panelTextureId = 0
+    private var quickPanelTextureId = 0
     private var videoTextureId = 0
     private var videoSurfaceTexture: SurfaceTexture? = null
     private var videoSurface: Surface? = null
@@ -89,26 +92,45 @@ class VrTheaterRenderer(
 
     private var positionBuffer: FloatBuffer? = null
     private var texCoordBuffer: FloatBuffer? = null
+    private var videoPositionBuffer: FloatBuffer? = null
     private var videoTexCoordBuffer: FloatBuffer? = null
     private var vertexCount = 0
+    private var videoVertexCount = 0
     private var textureWidth = 0
     private var textureHeight = 0
-    private var uploaded: Bitmap? = null
-    @Volatile private var hasVideoFrame = false
+    private var videoAspect = 0f
+    private var quickPanelTextureWidth = 0
+    private var quickPanelTextureHeight = 0
+    private var hasQuickPanelFrame = false
+    private var hasVideoFrame = false
+
+    private val quickPanelMesh = VrScreenGeometry.build(
+        scale = QUICK_PANEL_SCALE,
+        distance = QUICK_PANEL_DISTANCE,
+        verticalOffset = 0f,
+        curvature = 0f,
+        aspect = VrScreenGeometry.DEFAULT_ASPECT,
+    )
+    private val quickPanelPositions = direct(quickPanelMesh.positions)
+    private val quickPanelTexCoords = direct(quickPanelMesh.texCoords)
 
     private var lastScale = -1f
     private var lastDistance = -1f
     private var lastCurvature = -1f
     private var lastVerticalFlip: Boolean? = null
-    @Volatile private var meshDirty = true
+    private var meshDirty = true
 
     private val headQuaternion = FloatArray(4)
+    private val nextHeadQuaternion = FloatArray(4)
     private val centerQuaternion = FloatArray(4).also { it[3] = 1f }
+    private var hasHeadPose = false
+    private var recenterPending = false
     private val headRotation = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
     private val identity = FloatArray(16).also { VrMatrix4.identityInto(it) }
     private var loggedFirstFrame = false
+    private var loggedBitmapUploadError = false
 
     // P-D3: zoom-fill post-process. Cardboard's distortion mesh leaves vertical
     // black bands; we copy the SDK's FINAL default-framebuffer frame and blit it
@@ -118,9 +140,15 @@ class VrTheaterRenderer(
     private var zoomSnapshotMode = -1 // -1 = not probed, -2 = readPixels, 0..2 = copy format
     private var zoomTexW = 0
     private var zoomTexH = 0
-    private var zoomQuad: FloatBuffer? = null
-    private var zoomUv: FloatBuffer? = null
-    private var zoomUnsupported = false
+    // Framebuffer copies start at the bottom-left. The UV buffer is remapped for a centered crop.
+    private val zoomQuad = direct(floatArrayOf(-1f, -1f, 0f, 1f, -1f, 0f, -1f, 1f, 0f, 1f, 1f, 0f))
+    private val zoomUv = direct(FloatArray(8))
+    private val alignmentLine = direct(floatArrayOf(-.003f, -1f, 0f, .003f, -1f, 0f, -.003f, 0f, 0f, .003f, 0f, 0f))
+    private val unitUv = direct(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+    private var zoomReadback: ByteBuffer? = null
+    private var lastZoomScale = Float.NaN
+    private var unsupportedZoomWidth = 0
+    private var unsupportedZoomHeight = 0
     private var zoomLoggedActive = false
     private var zoomLoggedSkip: String? = null
     private val ZOOM_COPY_FORMATS = arrayOf(
@@ -129,9 +157,22 @@ class VrTheaterRenderer(
         intArrayOf(GLES20.GL_RGB, GLES20.GL_RGB, GLES20.GL_UNSIGNED_BYTE),
     )
 
-    fun markMeshDirty() { meshDirty = true }
-
     override fun onSurfaceCreated(config: EGLConfig) {
+        // EGL can recreate the context without calling onRendererShutdown. Keep only CPU state.
+        releaseVideoSurface()
+        videoTextureId = 0
+        hasVideoFrame = false
+        textureWidth = 0
+        textureHeight = 0
+        quickPanelTextureWidth = 0
+        quickPanelTextureHeight = 0
+        hasQuickPanelFrame = false
+        vertexCount = 0
+        videoVertexCount = 0
+        whiteTex = 0
+        loggedFirstFrame = false
+        loggedBitmapUploadError = false
+        capture.releasePending()
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glDisable(GLES20.GL_DITHER)
         panel = runCatching { createHandles(PANEL_FRAGMENT_SHADER) }
@@ -139,14 +180,14 @@ class VrTheaterRenderer(
         video = runCatching { createHandles(VIDEO_FRAGMENT_SHADER) }
             .onFailure { Log.e(TAG, "video shader link failed", it) }.getOrNull()
         panelTextureId = genTexture(GLES20.GL_TEXTURE_2D)
+        quickPanelTextureId = genTexture(GLES20.GL_TEXTURE_2D)
         zoomTextureId = genTexture(GLES20.GL_TEXTURE_2D)
-        // Full-screen quad in clip space. glCopyTexSubImage2D reads the
-        // framebuffer with a bottom-left origin, so UV (0,0) belongs at the
-        // BOTTOM vertex — no V flip here (that would invert the whole picture).
-        zoomQuad = direct(floatArrayOf(-1f, -1f, 0f, 1f, -1f, 0f, -1f, 1f, 0f, 1f, 1f, 0f))
-        zoomUv = direct(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
         zoomSnapshotMode = -1
-        zoomUnsupported = false
+        zoomTexW = 0
+        zoomTexH = 0
+        unsupportedZoomWidth = 0
+        unsupportedZoomHeight = 0
+        zoomReadback = null
         zoomLoggedActive = false
         zoomLoggedSkip = null
         if (isVideoHost) setupVideoTexture()
@@ -190,18 +231,36 @@ class VrTheaterRenderer(
     override fun onSurfaceChanged(width: Int, height: Int) = Unit
 
     override fun onNewFrame(headTransform: HeadTransform) {
-        headTransform.getQuaternion(headQuaternion, 0)
+        headTransform.getQuaternion(nextHeadQuaternion, 0)
+        val x = nextHeadQuaternion[0]
+        val y = nextHeadQuaternion[1]
+        val z = nextHeadQuaternion[2]
+        val w = nextHeadQuaternion[3]
+        val normSquared = x * x + y * y + z * z + w * w
+        if (normSquared.isFinite() && normSquared > 1e-8f) {
+            nextHeadQuaternion.copyInto(headQuaternion)
+            val firstPose = !hasHeadPose
+            hasHeadPose = true
+            if (recenterPending || (firstPose && VrSession.settings.recenterOnEnter)) recenter()
+        }
         // One capture per FRAME, not per eye. Both onDrawEye calls use the same
         // uploaded GL texture, so consuming on each eye would drop half the UI.
-        val bitmap = capture.consume()
-        if (bitmap != null && panelTextureId != 0) {
-            upload(bitmap)
-            if (!loggedFirstFrame) {
-                loggedFirstFrame = true
-                Log.i(TAG, "first window frame ${bitmap.width}x${bitmap.height} uploaded")
+        capture.consume()?.let { bitmap ->
+            try {
+                if (panelTextureId != 0) uploadWindow(bitmap)
+            } finally {
+                capture.returnScene(bitmap)
             }
         }
-        if (isVideoHost && VrVideoSurfaceRegistry.consumeFrameAvailable()) {
+        capture.consumePanel()?.let { bitmap ->
+            try {
+                if (quickPanelTextureId != 0) uploadQuickPanel(bitmap)
+            } finally {
+                capture.returnPanel(bitmap)
+            }
+        }
+        if (!VrSession.panelOpen) hasQuickPanelFrame = false
+        if (isVideoHost && VrVideoSurfaceRegistry.consumeFrameAvailable(this)) {
             val texture = videoSurfaceTexture ?: return
             try {
                 texture.updateTexImage()
@@ -212,14 +271,23 @@ class VrTheaterRenderer(
                 hasVideoFrame = false
             }
         }
+        if (hasVideoFrame) {
+            val aspect = VrVideoSurfaceRegistry.videoAspect().takeIf { it.isFinite() && it > 0f } ?: 0f
+            if (aspect != videoAspect) {
+                videoAspect = aspect
+                meshDirty = true
+            }
+        }
     }
 
     /** Recentre is marshalled onto the GL thread; see VrTheaterView.recenter(). */
     fun recenter() {
-        centerQuaternion[0] = headQuaternion[0]
-        centerQuaternion[1] = headQuaternion[1]
-        centerQuaternion[2] = headQuaternion[2]
-        centerQuaternion[3] = headQuaternion[3]
+        if (!hasHeadPose) {
+            recenterPending = true
+            return
+        }
+        headQuaternion.copyInto(centerQuaternion)
+        recenterPending = false
     }
 
     override fun onDrawEye(eye: CardboardView.Eye) {
@@ -227,48 +295,69 @@ class VrTheaterRenderer(
         if (s.screenScale != lastScale || s.screenDistanceMeters != lastDistance ||
             s.curvature != lastCurvature || s.verticalFlip != lastVerticalFlip) meshDirty = true
         if (meshDirty && textureWidth > 0) rebuildMesh(textureWidth.toFloat() / textureHeight.toFloat())
-        if (vertexCount == 0) return
+        val eyeFromHead = eye.getEyeFromHead()
+        val projection = eye.getPerspective(0.1f, 100f)
+        val panelProgram = panel
 
-        val head = if (s.headTrackingEnabled) {
-            VrHeadPose.viewRotationInto(headRotation, headQuaternion, centerQuaternion, s.headTrackingSensitivity)
-        } else identity
-        VrMatrix4.multiplyInto(viewMatrix, eye.getEyeFromHead(), head)
-        VrMatrix4.multiplyInto(mvpMatrix, eye.getPerspective(0.1f, 100f), viewMatrix)
-        if (s.ipdScale != 1f) {
-            val sign = when (eye.getEyeType()) {
-                CardboardView.Eye.LEFT -> 1f
-                CardboardView.Eye.RIGHT -> -1f
-                else -> 0f
+        // The SDK owns the framebuffer and eye viewport. These layers are composited in order.
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        if (vertexCount != 0) {
+            val head = if (s.headTrackingEnabled && hasHeadPose) {
+                VrHeadPose.viewRotationInto(headRotation, headQuaternion, centerQuaternion, s.headTrackingSensitivity)
+            } else identity
+            VrMatrix4.multiplyInto(viewMatrix, eyeFromHead, head)
+            VrMatrix4.multiplyInto(mvpMatrix, projection, viewMatrix)
+            if (s.ipdScale != 1f) {
+                val sign = when (eye.getEyeType()) {
+                    CardboardView.Eye.LEFT -> 1f
+                    CardboardView.Eye.RIGHT -> -1f
+                    else -> 0f
+                }
+                VrMatrix4.applyIpdShiftInto(mvpMatrix, s.ipdScale, sign)
             }
-            VrMatrix4.applyIpdShiftInto(mvpMatrix, s.ipdScale, sign)
+
+            val videoProgram = video
+            if (hasVideoFrame && videoProgram != null && videoTextureId != 0) {
+                drawQuad(videoProgram, mvpMatrix, s.brightness,
+                    GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId, videoPositionBuffer,
+                    videoTexCoordBuffer, videoVertexCount, stMatrix)
+            }
+            if (panelProgram != null) {
+                enableBitmapBlending()
+                drawQuad(panelProgram, mvpMatrix, s.brightness, GLES20.GL_TEXTURE_2D, panelTextureId,
+                    positionBuffer, texCoordBuffer, vertexCount)
+            }
         }
 
-        GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        val useVideo = hasVideoFrame && video != null && videoTextureId != 0
-        if (useVideo) {
-            drawQuad(video!!, mvpMatrix, s.brightness, 1f,
-                GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId, videoTexCoordBuffer, stMatrix)
-        }
-        // The window bitmap is opaque black where the 2D UI is empty; draw it
-        // with alpha so a live stream remains visible behind the UI chrome.
-        panel?.let {
-            drawQuad(it, mvpMatrix, s.brightness, 1f,
-                GLES20.GL_TEXTURE_2D, panelTextureId, texCoordBuffer, null)
+        if (VrSession.panelOpen && hasQuickPanelFrame && panelProgram != null) {
+            VrMatrix4.multiplyInto(mvpMatrix, projection, eyeFromHead)
+            enableBitmapBlending()
+            drawQuad(panelProgram, mvpMatrix, 1f, GLES20.GL_TEXTURE_2D, quickPanelTextureId,
+                quickPanelPositions, quickPanelTexCoords, quickPanelMesh.vertexCount)
         }
         GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     private fun drawQuad(
-        h: Handles, mvp: FloatArray, brightness: Float, alpha: Float,
-        target: Int, texture: Int, coords: FloatBuffer?, st: FloatArray?,
+        h: Handles,
+        mvp: FloatArray,
+        brightness: Float,
+        target: Int,
+        texture: Int,
+        positions: FloatBuffer?,
+        coords: FloatBuffer?,
+        count: Int,
+        st: FloatArray? = null,
     ) {
-        val pos = positionBuffer ?: return
+        val pos = positions ?: return
         val tex = coords ?: return
         GLES20.glUseProgram(h.program)
         GLES20.glUniformMatrix4fv(h.mvp, 1, false, mvp, 0)
         GLES20.glUniform1f(h.brightness, brightness)
-        if (h.alpha >= 0) GLES20.glUniform1f(h.alpha, alpha)
+        if (h.alpha >= 0) GLES20.glUniform1f(h.alpha, 1f)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(target, texture)
         GLES20.glUniform1i(h.texture, 0)
@@ -281,26 +370,53 @@ class VrTheaterRenderer(
         GLES20.glVertexAttribPointer(h.position, 3, GLES20.GL_FLOAT, false, 12, pos)
         GLES20.glEnableVertexAttribArray(h.texCoord)
         GLES20.glVertexAttribPointer(h.texCoord, 2, GLES20.GL_FLOAT, false, 8, tex)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, vertexCount)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, count)
         GLES20.glDisableVertexAttribArray(h.position)
         GLES20.glDisableVertexAttribArray(h.texCoord)
     }
 
-    private fun upload(bitmap: Bitmap) {
+    private fun enableBitmapBlending() {
+        // Android's Canvas writes premultiplied RGB. SRC_ALPHA would darken transparent edges.
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+    }
+
+    private fun uploadWindow(bitmap: Bitmap) {
         val changed = bitmap.width != textureWidth || bitmap.height != textureHeight
+        if (!uploadBitmap(panelTextureId, bitmap, changed)) return
         if (changed) {
             textureWidth = bitmap.width
             textureHeight = bitmap.height
             meshDirty = true
         }
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, panelTextureId)
-        if (changed) {
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-                textureWidth, textureHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        if (!loggedFirstFrame) {
+            loggedFirstFrame = true
+            Log.i(TAG, "first window frame ${bitmap.width}x${bitmap.height} uploaded")
         }
-        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
-        uploaded?.recycle()
-        uploaded = bitmap
+    }
+
+    private fun uploadQuickPanel(bitmap: Bitmap) {
+        val changed = bitmap.width != quickPanelTextureWidth || bitmap.height != quickPanelTextureHeight
+        if (!uploadBitmap(quickPanelTextureId, bitmap, changed)) return
+        quickPanelTextureWidth = bitmap.width
+        quickPanelTextureHeight = bitmap.height
+        hasQuickPanelFrame = true
+    }
+
+    private fun uploadBitmap(textureId: Int, bitmap: Bitmap, allocate: Boolean): Boolean {
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        if (allocate) {
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        } else {
+            GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+        }
+        if (!takeGlErrors()) return true
+        if (!loggedBitmapUploadError) {
+            loggedBitmapUploadError = true
+            Log.w(TAG, "could not upload a VR bitmap (${bitmap.width}x${bitmap.height})")
+        }
+        return false
     }
 
     private fun rebuildMesh(aspect: Float) {
@@ -311,7 +427,6 @@ class VrTheaterRenderer(
             verticalOffset = 0f,
             curvature = s.curvature,
             aspect = aspect,
-            segments = 1,
         )
         lastScale = s.screenScale
         lastDistance = s.screenDistanceMeters
@@ -320,20 +435,21 @@ class VrTheaterRenderer(
         meshDirty = false
         vertexCount = mesh.vertexCount
         positionBuffer = direct(mesh.positions)
-        // Canvas bitmaps are top-down; GL textures are bottom-up. Swap V so the
-        // UI reads upright in the headset without changing any shader.
-        val flipped = mesh.texCoords.copyOf()
-        for (i in 1 until flipped.size step 2) flipped[i] = 1f - flipped[i]
-        texCoordBuffer = direct(flipped)
-        // P-C1: MediaCodec -> SurfaceTexture -> GL_TEXTURE_EXTERNAL_OES has a
-        // natively inverted V axis relative to this quad. Flip ONLY the video
-        // UVs on the CPU (never the shader / stMatrix, never the panel/menu
-        // texture). User-toggleable because a different decoder path may differ.
-        val videoUv = mesh.texCoords.copyOf()
-        if (s.verticalFlip) {
-            for (i in 1 until videoUv.size step 2) videoUv[i] = 1f - videoUv[i]
+        // GLUtils uploads bitmap row zero to V=0. The bitmap mesh already maps its top to V=0.
+        texCoordBuffer = direct(mesh.texCoords)
+        if (isVideoHost) {
+            val videoMesh = VrScreenGeometry.buildFittedVideo(
+                scale = s.screenScale,
+                distance = s.screenDistanceMeters,
+                curvature = s.curvature,
+                sceneAspect = aspect,
+                videoAspect = videoAspect,
+            )
+            videoVertexCount = videoMesh.vertexCount
+            videoPositionBuffer = direct(videoMesh.positions)
+            // Transform or flip video independently of the Android UI and framebuffer copy.
+            videoTexCoordBuffer = direct(videoMesh.videoTexCoords(s.verticalFlip))
         }
-        videoTexCoordBuffer = direct(videoUv)
     }
 
     private fun direct(values: FloatArray): FloatBuffer =
@@ -371,106 +487,60 @@ class VrTheaterRenderer(
             return
         }
         val hProgram = panel ?: return noteZoomSkip("panel program unavailable")
-        if (zoomUnsupported) return noteZoomSkip("snapshot permanently unsupported")
+        if (w == unsupportedZoomWidth && h == unsupportedZoomHeight) return
 
-        // GLES2 rejects glCopyTexSubImage2D when the window buffer format does
-        // not match the texture format. Probe RGBA8 / RGB565 / RGB8 once, then
-        // remember the accepted format. Every failure path returns BEFORE any
-        // glClear so the SDK's original picture stays intact (no black screen).
-        while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { /* drain stale errors */ }
+        // Snapshot the SDK's completed stereo frame. A failed copy leaves that frame untouched.
+        takeGlErrors()
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, zoomTextureId)
+        if (w != zoomTexW || h != zoomTexH) zoomSnapshotMode = -1
         if (zoomSnapshotMode == -1) {
-            var accepted = false
             for (i in ZOOM_COPY_FORMATS.indices) {
-                val f = ZOOM_COPY_FORMATS[i]
-                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, f[0], w, h, 0, f[0], f[2], null)
-                GLES20.glCopyTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h)
-                if (GLES20.glGetError() == GLES20.GL_NO_ERROR) {
+                if (allocateZoomImage(w, h, ZOOM_COPY_FORMATS[i]) && copyZoomImage(viewport)) {
                     zoomSnapshotMode = i
-                    zoomTexW = w
-                    zoomTexH = h
-                    accepted = true
                     Log.i(TAG, "zoom snapshot: format[$i] accepted ${w}x$h")
                     break
                 }
             }
-            if (!accepted) {
-                // Last resort: readPixels + upload (slower, but never black).
-                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-                val bytes = w.toLong() * h * 4
-                if (bytes in 1..32L * 1024 * 1024) {
-                    val pixels = java.nio.ByteBuffer.allocateDirect(bytes.toInt())
-                        .order(ByteOrder.nativeOrder())
-                    GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-                    if (GLES20.glGetError() == GLES20.GL_NO_ERROR) {
-                        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, w, h,
-                            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-                        zoomSnapshotMode = -2
-                        zoomTexW = w
-                        zoomTexH = h
-                        Log.i(TAG, "zoom snapshot: readPixels fallback ${w}x$h")
-                    }
-                }
+            if (zoomSnapshotMode == -1 && w.toLong() * h * 4 <= MAX_ZOOM_READBACK_BYTES &&
+                allocateZoomImage(w, h, ZOOM_COPY_FORMATS[0]) && readZoomImage(viewport)
+            ) {
+                zoomSnapshotMode = -2
+                Log.i(TAG, "zoom snapshot: readPixels fallback ${w}x$h")
             }
             if (zoomSnapshotMode == -1) {
-                zoomUnsupported = true
+                unsupportedZoomWidth = w
+                unsupportedZoomHeight = h
+                zoomReadback = null
                 return noteZoomSkip("all snapshot formats failed")
             }
+            zoomTexW = w
+            zoomTexH = h
         } else {
-            if (w != zoomTexW || h != zoomTexH) {
-                val f = if (zoomSnapshotMode == -2) ZOOM_COPY_FORMATS[0] else ZOOM_COPY_FORMATS[zoomSnapshotMode]
-                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, f[0], w, h, 0, f[0], f[2], null)
-                zoomTexW = w
-                zoomTexH = h
-            }
-            if (zoomSnapshotMode == -2) {
-                val bytes = w.toLong() * h * 4
-                if (bytes !in 1..32L * 1024 * 1024) return noteZoomSkip("readback too large")
-                val pixels = java.nio.ByteBuffer.allocateDirect(bytes.toInt()).order(ByteOrder.nativeOrder())
-                GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-                GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, w, h,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-            } else {
-                GLES20.glCopyTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h)
-                if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
-                    zoomSnapshotMode = -1 // re-probe next frame after a GL context change
-                    return noteZoomSkip("copy failed on this frame")
-                }
+            val copied = if (zoomSnapshotMode == -2) readZoomImage(viewport) else copyZoomImage(viewport)
+            if (!copied) {
+                zoomSnapshotMode = -1
+                return noteZoomSkip("copy failed on this frame")
             }
         }
 
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        // CENTRE zoom: GLES2 allows a viewport larger than the framebuffer; the
-        // overflow is clipped symmetrically on all four edges. Starting at (0,0)
-        // would push the picture to the top-right instead of cropping the bands.
-        val zw = (w * zoom).toInt()
-        val zh = (h * zoom).toInt()
-        GLES20.glViewport((w - zw) / 2, (h - zh) / 2, zw, zh)
-        GLES20.glClearColor(0f, 0f, 0f, 1f)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        if (lastZoomScale != zoom) {
+            // Full viewport with a centered UV crop scales evenly without exceeding GL viewport limits.
+            val inset = (1f - 1f / zoom) / 2f
+            val end = 1f - inset
+            zoomUv.put(0, inset).put(1, inset).put(2, end).put(3, inset)
+            zoomUv.put(4, inset).put(5, end).put(6, end).put(7, end)
+            lastZoomScale = zoom
+        }
+        GLES20.glViewport(viewport.x, viewport.y, w, h)
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(hProgram.program)
-        GLES20.glUniformMatrix4fv(hProgram.mvp, 1, false, identity, 0)
-        GLES20.glUniform1f(hProgram.brightness, 1f)
-        GLES20.glUniform1f(hProgram.alpha, 1f)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, zoomTextureId)
-        GLES20.glUniform1i(hProgram.texture, 0)
-        val pos = zoomQuad ?: return
-        val uv = zoomUv ?: return
-        pos.position(0)
-        uv.position(0)
-        GLES20.glEnableVertexAttribArray(hProgram.position)
-        GLES20.glVertexAttribPointer(hProgram.position, 3, GLES20.GL_FLOAT, false, 12, pos)
-        GLES20.glEnableVertexAttribArray(hProgram.texCoord)
-        GLES20.glVertexAttribPointer(hProgram.texCoord, 2, GLES20.GL_FLOAT, false, 8, uv)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisableVertexAttribArray(hProgram.position)
-        GLES20.glDisableVertexAttribArray(hProgram.texCoord)
-        GLES20.glViewport(0, 0, w, h)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        drawQuad(hProgram, identity, 1f, GLES20.GL_TEXTURE_2D, zoomTextureId, zoomQuad, zoomUv, 4)
+        if (takeGlErrors()) return noteZoomSkip("snapshot draw failed")
         if (!zoomLoggedActive) {
             zoomLoggedActive = true
             zoomLoggedSkip = null
@@ -478,44 +548,55 @@ class VrTheaterRenderer(
         }
     }
 
+    private fun allocateZoomImage(width: Int, height: Int, format: IntArray): Boolean {
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, format[0], width, height, 0, format[1], format[2], null)
+        return !takeGlErrors()
+    }
+
+    private fun copyZoomImage(viewport: Viewport): Boolean {
+        GLES20.glCopyTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0,
+            viewport.x, viewport.y, viewport.width, viewport.height)
+        return !takeGlErrors()
+    }
+
+    private fun readZoomImage(viewport: Viewport): Boolean {
+        val byteCount = viewport.width * viewport.height * 4
+        val pixels = zoomReadback?.takeIf { it.capacity() == byteCount }
+            ?: ByteBuffer.allocateDirect(byteCount).also { zoomReadback = it }
+        pixels.position(0)
+        GLES20.glReadPixels(viewport.x, viewport.y, viewport.width, viewport.height,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+        if (takeGlErrors()) return false
+
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, viewport.width, viewport.height,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+        return !takeGlErrors()
+    }
+
+    private fun takeGlErrors(): Boolean {
+        var sawError = false
+        while (GLES20.glGetError() != GLES20.GL_NO_ERROR) sawError = true
+        return sawError
+    }
+
     /** P-D7: one fixed white vertical line at the physical screen centre. */
     private fun drawAlignmentLine(viewport: Viewport) {
         val h = panel ?: return
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        GLES20.glViewport(0, 0, viewport.width, viewport.height)
+        GLES20.glViewport(viewport.x, viewport.y, viewport.width, viewport.height)
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(h.program)
-        GLES20.glUniformMatrix4fv(h.mvp, 1, false, identity, 0)
-        GLES20.glUniform1f(h.brightness, 1f)
-        GLES20.glUniform1f(h.alpha, 1f)
-        // Reuse a 1x1 white texture by binding the zoom texture is unsafe (it is
-        // a snapshot); instead use a tiny solid colour via the panel program with
-        // the video texture disabled: draw a thin quad with a constant white texel.
-        val px = 0.003f
-        val line = direct(floatArrayOf(-px, -1f, 0f, px, -1f, 0f, -px, 0f, 0f, px, 0f, 0f))
-        val uv = direct(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, whiteTextureId())
-        GLES20.glUniform1i(h.texture, 0)
-        line.position(0); uv.position(0)
-        GLES20.glEnableVertexAttribArray(h.position)
-        GLES20.glVertexAttribPointer(h.position, 3, GLES20.GL_FLOAT, false, 12, line)
-        GLES20.glEnableVertexAttribArray(h.texCoord)
-        GLES20.glVertexAttribPointer(h.texCoord, 2, GLES20.GL_FLOAT, false, 8, uv)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisableVertexAttribArray(h.position)
-        GLES20.glDisableVertexAttribArray(h.texCoord)
+        drawQuad(h, identity, 1f, GLES20.GL_TEXTURE_2D, whiteTextureId(), alignmentLine, unitUv, 4)
     }
 
     private var whiteTex = 0
     private fun whiteTextureId(): Int {
         if (whiteTex == 0) {
-            val ids = intArrayOf(0)
-            GLES20.glGenTextures(1, ids, 0)
-            whiteTex = ids[0]
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, whiteTex)
+            whiteTex = genTexture(GLES20.GL_TEXTURE_2D)
             GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, 1, 1, 0,
                 GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE,
                 java.nio.ByteBuffer.allocateDirect(4)
@@ -527,33 +608,43 @@ class VrTheaterRenderer(
 
     override fun onRendererShutdown() = release()
 
-    /**
-     * Idempotent cleanup. CardboardView.onDestroy() only stops the GL thread, so
-     * VrTheaterView also calls this through queueEvent() before shutting down.
-     */
-    fun release() {
+    private fun releaseVideoSurface() {
+        if (videoSurface == null) return
+        videoSurfaceTexture?.setOnFrameAvailableListener(null)
         VrVideoSurfaceRegistry.clear(this)
         videoSurface?.release()
         videoSurfaceTexture?.release()
         videoSurface = null
         videoSurfaceTexture = null
+        hasVideoFrame = false
+    }
+
+    /**
+     * Idempotent cleanup. CardboardView.onDestroy() only stops the GL thread, so
+     * VrTheaterView also calls this through queueEvent() before shutting down.
+     */
+    fun release() {
+        releaseVideoSurface()
         if (panelTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(panelTextureId), 0)
+        if (quickPanelTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(quickPanelTextureId), 0)
         if (videoTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(videoTextureId), 0)
         if (zoomTextureId != 0) GLES20.glDeleteTextures(1, intArrayOf(zoomTextureId), 0)
         if (whiteTex != 0) GLES20.glDeleteTextures(1, intArrayOf(whiteTex), 0)
         zoomTextureId = 0
         whiteTex = 0
         zoomSnapshotMode = -1
-        zoomUnsupported = false
+        unsupportedZoomWidth = 0
+        unsupportedZoomHeight = 0
+        zoomReadback = null
         panel?.let { GLES20.glDeleteProgram(it.program) }
         video?.let { GLES20.glDeleteProgram(it.program) }
         panelTextureId = 0
+        quickPanelTextureId = 0
         videoTextureId = 0
         panel = null
         video = null
-        uploaded?.recycle()
-        uploaded = null
         capture.releasePending()
+        hasQuickPanelFrame = false
         hasVideoFrame = false
     }
 }

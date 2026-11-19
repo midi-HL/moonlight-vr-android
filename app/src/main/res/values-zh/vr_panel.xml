@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vr_enter">进入 VR</string>
+    <string name="vr_unavailable">VR 需要 Android 7.0 或更新版本、受支持的 64 位运行环境和 OpenGL ES 3.0。</string>
+    <string name="vr_restart_stream">请返回 Moonlight 首页，先开启 VR，再以兼容的 SDR 模式开始串流。</string>
+    <string name="vr_panel_title">VR 快捷设置</string>
+    <string name="vr_panel_session">会话</string>
+    <string name="vr_panel_display">显示</string>
+    <string name="vr_panel_tracking">追踪与舒适度</string>
+    <string name="vr_panel_controller">手柄</string>
+    <string name="vr_panel_on">开启</string>
+    <string name="vr_panel_off">关闭</string>
+    <string name="vr_panel_zoom">整体放大</string>
+    <string name="vr_panel_recenter">重置视角中心</string>
+    <string name="vr_panel_exit">退出 VR</string>
+    <string name="vr_panel_hint">↑ ↓ 选择     A 确认或调节     B 关闭</string>
+    <string name="vr_panel_edit_hint">← → 或摇杆 调节     A 完成     B 返回</string>
+</resources>

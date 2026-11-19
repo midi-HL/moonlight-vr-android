@@ -17,13 +17,16 @@ class VrGamepadRouter {
     var deadZone = VrSettings.DEFAULT.gamepadDeadZone
     var repeatMs = VrSettings.DEFAULT.menuRepeatMs
 
-    private val pressed = HashSet<Int>()
-    private var comboFired = false
-    private var menuArmed = false
+    private data class Button(val deviceId: Int, val keyCode: Int)
+
+    private val pressed = HashSet<Button>()
+    private val captured = HashSet<Button>()
+    private var menuDevice: Int? = null
+    private var menuHoldFired = false
     private var lastAxisMs = Long.MIN_VALUE
-    private var lastHatY = 0f
+    private var lastHatDirection = 0
     private var navAxisMs = Long.MIN_VALUE
-    private var navHatY = 0f
+    private var navHatDirection = 0
 
     /** Direction to inject into the 2D focus system while the quick panel is closed. */
     var pendingNavDirection: Int = 0
@@ -46,74 +49,92 @@ class VrGamepadRouter {
 
     fun reset() {
         pressed.clear()
-        comboFired = false
-        menuArmed = false
+        captured.clear()
+        menuDevice = null
+        menuHoldFired = false
+        lastHatDirection = 0
+        navHatDirection = 0
         resetAxisHold()
-        editing = false
     }
 
     /** Restarts the stick repeat cadence when edit mode changes. */
     fun resetAxisHold() {
         lastAxisMs = Long.MIN_VALUE
-        // P-E7: deliberately DO NOT clear lastHatY. It records the physical
-        // edge state of a still-held D-pad; zeroing it makes the next motion
-        // event fire a second MoveSelection, so pressing A while holding the
-        // D-pad skips a row.
+        // Preserve the physical HAT edge when entering or leaving edit mode.
         navAxisMs = Long.MIN_VALUE
-        navHatY = 0f
         pendingNavDirection = 0
     }
 
     /** Called by VrSession once the armed long-press has elapsed. */
     fun onMenuHoldElapsed(): Command.TogglePanel? {
-        if (!vrEnabled || !menuHoldActive()) return null
+        val device = menuDevice ?: return null
+        if (menuHoldFired || !vrEnabled || panelOpen || !menuHoldActive(device)) return null
+        menuHoldFired = true
         return Command.TogglePanel
     }
 
-    fun onKey(keyCode: Int, action: Int, isGamepadSource: Boolean): Command {
-        if (!isGamepadSource) return Command.PassThrough
+    fun onKey(
+        keyCode: Int,
+        action: Int,
+        isGamepadSource: Boolean,
+        deviceId: Int = 0,
+        isRepeat: Boolean = false,
+    ): Command {
+        val button = Button(deviceId, keyCode)
         if (action == VrKeys.ACTION_UP) {
-            val wasMenuActive = menuHoldActive()
-            pressed.remove(keyCode)
-            if (!comboPressed()) comboFired = false
-            if (wasMenuActive && !menuHoldActive()) {
-                menuArmed = false
-                return Command.CancelMenuHold
+            val owned = captured.remove(button)
+            val wasPressed = pressed.remove(button)
+            if (menuDevice == deviceId && !menuHoldActive(deviceId)) {
+                menuDevice = null
+                menuHoldFired = false
+                // A button that reached the app on DOWN still needs its UP.
+                if (owned) return Command.CancelMenuHold
             }
-            return if (panelOpen) Command.Consumed else Command.PassThrough
+            return if (owned || (panelOpen && isGamepadSource && !wasPressed)) {
+                Command.Consumed
+            } else Command.PassThrough
         }
-        if (action != VrKeys.ACTION_DOWN) return Command.PassThrough
-        val wasMenuActive = menuHoldActive()
-        val comboBefore = comboPressed()
-        val alreadyDown = !pressed.add(keyCode)
-        val comboNow = comboPressed()
+        if (action != VrKeys.ACTION_DOWN || !isGamepadSource) return Command.PassThrough
+        val wasMenuActive = menuHoldActive(deviceId)
+        val alreadyDown = button in pressed
+        if (alreadyDown || isRepeat) {
+            if (button !in captured) {
+                return if (panelOpen) Command.Consumed else Command.PassThrough
+            }
+            // Direction repeats are useful. Confirmation and dismissal must be fresh presses.
+            return if (panelOpen) when (keyCode) {
+                VrKeys.DPAD_UP -> Command.Move(-1)
+                VrKeys.DPAD_DOWN -> Command.Move(1)
+                VrKeys.DPAD_LEFT -> if (editing) Command.Adjust(-1) else Command.Consumed
+                VrKeys.DPAD_RIGHT -> if (editing) Command.Adjust(1) else Command.Consumed
+                else -> Command.Consumed
+            } else Command.Consumed
+        }
+        pressed.add(button)
 
-        // P-E5: L1+R1 must fire ONLY on the edge where the combination BECOMES
-        // held, and only when a shoulder key is the key just pressed. A plain
-        // level check lets stale held shoulders (e.g. after menu paging) or
-        // their own OS key-repeat re-trigger and kick the user out of VR.
-        if (!panelOpen && comboNow) {
-            val shoulderDown = keyCode == VrKeys.BUTTON_L1 || keyCode == VrKeys.BUTTON_R1
-            if (!comboBefore && shoulderDown && !alreadyDown && !comboFired) {
-                comboFired = true
-                if (!vrEnabled) return Command.ToggleVr
+        if (!vrEnabled) {
+            val shoulder = keyCode == VrKeys.BUTTON_L1 || keyCode == VrKeys.BUTTON_R1
+            if (shoulder && isPressed(deviceId, VrKeys.BUTTON_L1) && isPressed(deviceId, VrKeys.BUTTON_R1)) {
+                captured.add(button)
+                return Command.ToggleVr
             }
-            if (alreadyDown || comboFired) return Command.Consumed
+            return Command.PassThrough
         }
-        if (!vrEnabled) return Command.PassThrough
 
         // START+SELECT / HOME: arm the long-press on the DOWN edge that completes it.
-        if (!wasMenuActive && menuHoldActive() && !menuArmed && !panelOpen) {
-            menuArmed = true
+        if (!wasMenuActive && menuHoldActive(deviceId) && menuDevice == null && !panelOpen) {
+            menuDevice = deviceId
+            captured.add(button)
             return Command.ArmMenuHold
         }
         if (panelOpen) {
+            captured.add(button)
             return when (keyCode) {
                 VrKeys.DPAD_UP -> Command.Move(-1)
                 VrKeys.DPAD_DOWN -> Command.Move(1)
                 VrKeys.DPAD_LEFT -> if (editing) Command.Adjust(-1) else Command.Consumed
                 VrKeys.DPAD_RIGHT -> if (editing) Command.Adjust(1) else Command.Consumed
-                VrKeys.BUTTON_A, VrKeys.DPAD_CENTER -> Command.Confirm
+                VrKeys.BUTTON_A, VrKeys.DPAD_CENTER, VrKeys.ENTER -> Command.Confirm
                 VrKeys.BUTTON_B, VrKeys.BUTTON_SELECT,
                 VrKeys.BUTTON_START, VrKeys.BUTTON_MODE -> Command.ClosePanel
                 else -> Command.Consumed
@@ -124,6 +145,10 @@ class VrGamepadRouter {
 
     fun onAxis(x: Float, y: Float, timeMs: Long): Command {
         if (!panelOpen) return Command.PassThrough
+        if (abs(x) <= deadZone && abs(y) <= deadZone) {
+            lastAxisMs = Long.MIN_VALUE
+            return Command.Consumed
+        }
         // eventTime is uptimeMillis and may be small on a freshly booted device;
         // Long.MIN_VALUE sentinel must not overflow when subtracted.
         if (lastAxisMs != Long.MIN_VALUE && timeMs - lastAxisMs < repeatMs) return Command.Consumed
@@ -145,16 +170,16 @@ class VrGamepadRouter {
      * [pendingNavDirection] and injects one DPAD key per repeat window.
      */
     fun onUiNavigation(x: Float, y: Float, hatY: Float, timeMs: Long): Boolean {
+        return onUiNavigation(x, y, 0f, hatY, timeMs)
+    }
+
+    fun onUiNavigation(x: Float, y: Float, hatX: Float, hatY: Float, timeMs: Long): Boolean {
         if (!vrEnabled || panelOpen) return false
-        val hat = when {
-            hatY < -0.5f -> -1f
-            hatY > 0.5f -> 1f
-            else -> 0f
-        }
-        if (hat != navHatY) {
-            navHatY = hat
-            if (hat != 0f) {
-                pendingNavDirection = hat.toInt()
+        val hat = hatDirection(hatX, hatY)
+        if (hat != navHatDirection) {
+            navHatDirection = hat
+            if (hat != 0) {
+                pendingNavDirection = hat
                 navAxisMs = timeMs
                 return true
             }
@@ -165,7 +190,10 @@ class VrGamepadRouter {
             abs(x) > deadZone -> if (x < 0) -2 else 2
             else -> 0
         }
-        if (direction == 0) return false
+        if (direction == 0) {
+            navAxisMs = Long.MIN_VALUE
+            return false
+        }
         navAxisMs = timeMs
         pendingNavDirection = direction
         return true
@@ -177,26 +205,32 @@ class VrGamepadRouter {
         return value
     }
 
-    /** Many pads report the D-pad as AXIS_HAT_Y instead of DPAD keycodes. */
-    fun onHat(hatY: Float): Command {
+    fun onHat(hatY: Float): Command = onHat(0f, hatY)
+
+    /** Many pads report the D-pad as HAT axes instead of DPAD keycodes. */
+    fun onHat(hatX: Float, hatY: Float): Command {
         if (!panelOpen) return Command.PassThrough
-        val normalized = when {
-            hatY < -0.5f -> -1f
-            hatY > 0.5f -> 1f
-            else -> 0f
+        val direction = hatDirection(hatX, hatY)
+        if (direction == lastHatDirection) return Command.Consumed
+        lastHatDirection = direction
+        return when (direction) {
+            -1, 1 -> Command.Move(direction)
+            -2, 2 -> if (editing) Command.Adjust(direction / 2) else Command.Consumed
+            else -> Command.Consumed
         }
-        if (normalized == lastHatY) return Command.Consumed
-        lastHatY = normalized
-        if (normalized == 0f) return Command.Consumed
-        return Command.Move(normalized.toInt())
     }
 
-    private fun comboPressed(): Boolean =
-        pressed.contains(VrKeys.BUTTON_L1) && pressed.contains(VrKeys.BUTTON_R1)
+    private fun hatDirection(x: Float, y: Float): Int = when {
+        abs(y) > 0.5f && abs(y) >= abs(x) -> if (y < 0) -1 else 1
+        abs(x) > 0.5f -> if (x < 0) -2 else 2
+        else -> 0
+    }
 
-    private fun menuHoldActive(): Boolean =
-        (pressed.contains(VrKeys.BUTTON_START) && pressed.contains(VrKeys.BUTTON_SELECT)) ||
-            pressed.contains(VrKeys.BUTTON_MODE)
+    private fun isPressed(deviceId: Int, keyCode: Int): Boolean = Button(deviceId, keyCode) in pressed
+
+    private fun menuHoldActive(deviceId: Int): Boolean =
+        (isPressed(deviceId, VrKeys.BUTTON_START) && isPressed(deviceId, VrKeys.BUTTON_SELECT)) ||
+            isPressed(deviceId, VrKeys.BUTTON_MODE)
 
     companion object {
         /** Source mask check without importing android.view.InputDevice. */

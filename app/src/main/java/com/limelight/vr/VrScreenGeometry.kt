@@ -4,7 +4,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Geometry for the FLAT 2D stream screen placed in VR space.
+ * Geometry for the virtual screen placed in VR space.
  *
  * The video is a single texture mapped onto one quad (optionally bent into a gentle arc).
  * Both eyes draw the SAME quad from slightly different viewpoints — that is ordinary stereo of a
@@ -27,12 +27,34 @@ object VrScreenGeometry {
         val positions: FloatArray,
         val texCoords: FloatArray,
         val vertexCount: Int,
-    )
+    ) {
+        /** A producer-specific correction applied before SurfaceTexture's transform. */
+        fun videoTexCoords(verticalFlip: Boolean): FloatArray {
+            if (!verticalFlip) return texCoords
+            return texCoords.copyOf().apply {
+                for (i in 1 until size step 2) this[i] = 1f - this[i]
+            }
+        }
+    }
 
     fun halfHeight(scale: Float): Float = BASE_HALF_HEIGHT * scale.coerceAtLeast(0.01f)
 
     fun halfWidth(scale: Float, aspect: Float): Float =
         halfHeight(scale) * (if (aspect > 0f) aspect else DEFAULT_ASPECT)
+
+    /** Fit a video of a different aspect inside the scene, including along its curvature. */
+    fun buildFittedVideo(
+        scale: Float,
+        distance: Float,
+        curvature: Float,
+        sceneAspect: Float,
+        videoAspect: Float,
+    ): Mesh {
+        val aspect = videoAspect.takeIf { it.isFinite() && it > 0f } ?: sceneAspect
+        val widthFraction = minOf(1f, aspect / sceneAspect)
+        val heightFraction = minOf(1f, sceneAspect / aspect)
+        return build(scale * heightFraction, distance, 0f, curvature * widthFraction, aspect)
+    }
 
     /**
      * @param scale         screenScale from VrSettings (the headline "make it bigger" control)
@@ -50,12 +72,13 @@ object VrScreenGeometry {
         aspect: Float,
         segments: Int = DEFAULT_SEGMENTS,
     ): Mesh {
-        val count = segments.coerceAtLeast(1)
         val safeAspect = if (aspect > 0f) aspect else DEFAULT_ASPECT
         val h = halfHeight(scale)
         val w = halfWidth(scale, safeAspect)
         val bend = curvature.coerceIn(0f, 1f) * MAX_BEND_RADIANS
-        val radius = if (bend > 1e-5f) w / bend else 0f
+        val curved = bend > 1e-5f
+        val count = if (curved) segments.coerceAtLeast(2) else 1
+        val radius = if (curved) w / bend else 0f
         val d = distance.coerceAtLeast(0.1f)
 
         val vertexCount = (count + 1) * 2
@@ -67,7 +90,7 @@ object VrScreenGeometry {
             val n = u * 2f - 1f
             val x: Float
             val z: Float
-            if (bend > 1e-5f) {
+            if (curved) {
                 val theta = n * bend
                 x = radius * sin(theta)
                 // Edges curve towards the viewer (z becomes less negative), wrapping the FOV.
@@ -86,6 +109,7 @@ object VrScreenGeometry {
             positions[top * 3 + 1] = verticalOffset + h
             positions[top * 3 + 2] = z
 
+            // Bitmap uploads put their first (top) row at texture V=0.
             texCoords[bottom * 2] = u
             texCoords[bottom * 2 + 1] = 1f
             texCoords[top * 2] = u

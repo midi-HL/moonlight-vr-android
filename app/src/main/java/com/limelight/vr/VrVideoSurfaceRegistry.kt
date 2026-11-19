@@ -25,28 +25,32 @@ internal object VrVideoSurfaceRegistry {
     fun currentTexture(): SurfaceTexture? = surfaceTexture
     fun currentTextureId(): Int = textureId
 
-    fun markFrameAvailable() { frameAvailable.set(true) }
-    fun consumeFrameAvailable(): Boolean = frameAvailable.compareAndSet(true, false)
+    @Synchronized fun consumeFrameAvailable(owner: Any): Boolean =
+        surfaceOwner === owner && frameAvailable.compareAndSet(true, false)
+
+    fun videoAspect(): Float = decoder?.get()?.vrVideoAspect() ?: 0f
 
     /** Decoder registers itself from Game; immediately adopts an active VR surface. */
-    fun attachDecoder(renderer: MediaCodecDecoderRenderer) {
+    @Synchronized fun attachDecoder(renderer: MediaCodecDecoderRenderer) {
         decoder = WeakReference(renderer)
         renderer.setVrOutputSurface(surface)
     }
 
-    fun detachDecoder(renderer: MediaCodecDecoderRenderer) {
+    @Synchronized fun detachDecoder(renderer: MediaCodecDecoderRenderer) {
         if (decoder?.get() === renderer) decoder = null
         renderer.setVrOutputSurface(null)
     }
 
     /** GL thread only. */
-    fun install(id: Int, texture: SurfaceTexture, output: Surface, owner: Any) {
+    @Synchronized fun install(id: Int, texture: SurfaceTexture, output: Surface, owner: Any) {
         clear()
         textureId = id
         surfaceTexture = texture
         surface = output
         surfaceOwner = owner
-        texture.setOnFrameAvailableListener { markFrameAvailable() }
+        texture.setOnFrameAvailableListener {
+            synchronized(this) { if (surfaceOwner === owner && surfaceTexture === texture) frameAvailable.set(true) }
+        }
         decoder?.get()?.setVrOutputSurface(output)
     }
 
@@ -55,8 +59,9 @@ internal object VrVideoSurfaceRegistry {
      * stale non-video Activity stopping its GL thread after a newer Game host
      * has already installed its own surface.
      */
-    fun clear(owner: Any? = null) {
+    @Synchronized fun clear(owner: Any? = null) {
         if (owner != null && surfaceOwner !== owner) return
+        surfaceTexture?.setOnFrameAvailableListener(null)
         surface = null
         surfaceTexture = null
         surfaceOwner = null

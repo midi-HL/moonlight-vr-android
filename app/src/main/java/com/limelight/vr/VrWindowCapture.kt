@@ -2,129 +2,175 @@ package com.limelight.vr
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
+import android.graphics.PorterDuff
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
-import android.view.ViewGroup
-import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 
-/**
- * Renders the ENTIRE Activity decor (plus the detached quick panel) into one
- * Bitmap, then hands it to the GL thread as a texture upload.
- *
- * Why a Bitmap and not a SurfaceTexture: the requirement is "all 2D screens,
- * including the home page, work in VR". A View tree is not a single Surface —
- * it is many Views, some of them SurfaceViews (the stream video). Capturing the
- * decor on the UI thread with Canvas.draw() is the only approach that keeps
- * every existing screen, dialog and preference row intact without rewriting
- * 600+ source files. Game's StreamView keeps rendering behind the promoted GL
- * layer; VrTheaterRenderer samples it through external-OES once a VR video
- * SurfaceTexture is registered. Until then the decor bitmap still shows the UI.
- *
- * Double buffering: [pending] owns the newest Bitmap exclusively. The GL thread
- * recycles the previous upload after replacing the texture, so Canvas.draw and
- * glTexSubImage2D never touch the same pixels.
- */
+/** Captures the application and quick controls separately for the GL thread. */
 class VrWindowCapture(
     private val source: View,
     private val panel: VrPanelView,
     private val isVideoHost: Boolean,
 ) {
-    private val uiHandler = Handler(Looper.getMainLooper())
-    private val pending = AtomicReference<Bitmap?>(null)
-    private var width = 0
-    private var height = 0
-
-    init {
-        schedule()
-    }
-
-    fun markDirty() = schedule()
-
-    fun stop() {
-        uiHandler.removeCallbacks(tick)
-        // Do NOT recycle here: the GL thread may have already consumed the
-        // Bitmap and be uploading it. Ownership transfer is atomic at
-        // consume(); anything still in pending is recycled by the GL shutdown.
-        pending.set(null)
-    }
-
-    /** GL thread only, from the renderer shutdown path. */
-    fun releasePending() {
-        pending.getAndSet(null)?.recycle()
-    }
-
-    /** GL thread: takes ownership of the newest completed frame. */
-    fun consume(): Bitmap? = pending.getAndSet(null)
-
-    private fun schedule() {
-        uiHandler.removeCallbacks(tick)
-        uiHandler.post(tick)
-    }
+    private val handler = Handler(Looper.getMainLooper())
+    private val sceneFrames = Frames()
+    private val panelFrames = Frames()
+    private val sourceLocation = IntArray(2)
+    private val dialogLocation = IntArray(2)
+    private var stopped = false
+    private var lastPanelSettings: VrSettings? = null
+    private var lastPanelIndex = -1
+    private var lastPanelEditing = false
+    private var reportedDrawFailure = false
 
     private val tick = object : Runnable {
         override fun run() {
-            val w = source.width
-            val h = source.height
-            if (w <= 0 || h <= 0) {
-                uiHandler.postDelayed(this, FRAME_MS)
-                return
-            }
-            if (w != width || h != height) {
-                width = w
-                height = h
-                panel.layoutFor(w, h)
-            }
-            val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            val c = Canvas(b)
-            // Transparent background: when a stream frame is present the VR
-            // video quad shows through everything the 2D UI did not paint.
-            // Screens without a video (home page, settings) still render their
-            // own opaque backgrounds from the existing decor Views.
-            c.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
-            // Exclude the CardboardView itself, otherwise we feed the VR picture
-            // back into its own texture (infinite feedback / growing lag).
-            // On the streaming screen also hide the full-screen background View
-            // so the video quad stays visible underneath the UI-only overlay.
-            val hiddenViews = mutableListOf<Pair<View, Int>>()
-            fun hide(view: View) {
-                hiddenViews += view to view.visibility
-                view.visibility = View.INVISIBLE
-            }
-            findTheater(source)?.let(::hide)
-            if (isVideoHost) {
-                source.findViewById<View>(
-                    source.resources.getIdentifier("backgroundTouchView", "id", source.context.packageName)
-                )?.let(::hide)
-            }
-            try {
-                source.draw(c)
-            } finally {
-                hiddenViews.forEach { (view, visibility) -> view.visibility = visibility }
-            }
-            // Dialog windows are composited separately by SurfaceFlinger and are
-            // NOT part of the Activity decor. Draw their registered decors on
-            // top, otherwise a settings dialog would be invisible in VR.
-            VrSession.activeDialogDecors().forEach { dialogDecor -> dialogDecor.draw(c) }
-            if (VrSession.panelOpen) {
-                panel.drawInto(c, VrSession.settings, VrSession.selectedIndex, VrSession.editing)
-            }
-            pending.getAndSet(b)?.recycle()
-            uiHandler.postDelayed(this, FRAME_MS)
+            if (stopped) return
+            val width = source.width
+            val height = source.height
+            if (width > 0 && height > 0) captureScene(width, height)
+            capturePanel()
+            if (!stopped) handler.postDelayed(this, FRAME_MS)
         }
     }
 
-    private fun findTheater(root: View): View? {
-        if (root is VrTheaterView) return root
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                val found = findTheater(root.getChildAt(i))
-                if (found != null) return found
-            }
-        }
-        return null
+    init { markDirty() }
+
+    fun markDirty() {
+        if (stopped) return
+        handler.removeCallbacks(tick)
+        handler.post(tick)
     }
 
-    private companion object { const val FRAME_MS = 66L }
+    fun stop() {
+        stopped = true
+        handler.removeCallbacks(tick)
+        sceneFrames.close()
+        panelFrames.close()
+    }
+
+    // Context loss can destroy a GL renderer while this capture remains attached.
+    // Drop queued frames, allowing the producer to publish new ones on the next tick.
+    fun releasePending() {
+        sceneFrames.dropPending()
+        panelFrames.dropPending()
+        // markDirty is confined to the main thread.
+        handler.post {
+            lastPanelSettings = null
+            markDirty()
+        }
+    }
+
+    fun consume(): Bitmap? = sceneFrames.consume()
+    fun consumePanel(): Bitmap? = panelFrames.consume()
+    fun returnScene(bitmap: Bitmap) = sceneFrames.giveBack(bitmap)
+    fun returnPanel(bitmap: Bitmap) = panelFrames.giveBack(bitmap)
+
+    private fun captureScene(width: Int, height: Int) {
+        val scale = minOf(1f, MAX_SCENE_EDGE.toFloat() / maxOf(width, height))
+        val bitmap = sceneFrames.obtain((width * scale).roundToInt().coerceAtLeast(1),
+            (height * scale).roundToInt().coerceAtLeast(1))
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(0, PorterDuff.Mode.CLEAR)
+        canvas.scale(scale, scale)
+        try {
+            // SurfaceView pixels never enter a software Canvas. Do not change its
+            // visibility to exclude it: that can tear down the producer Surface.
+            source.draw(canvas)
+            source.getLocationOnScreen(sourceLocation)
+            VrSession.activeDialogDecors(source).forEach { dialog ->
+                dialog.getLocationOnScreen(dialogLocation)
+                val checkpoint = canvas.save()
+                try {
+                    canvas.translate((dialogLocation[0] - sourceLocation[0]).toFloat(),
+                        (dialogLocation[1] - sourceLocation[1]).toFloat())
+                    dialog.draw(canvas)
+                } finally {
+                    canvas.restoreToCount(checkpoint)
+                }
+            }
+            sceneFrames.publish(bitmap)
+            reportedDrawFailure = false
+        } catch (failure: IllegalArgumentException) {
+            // Device/profile-specific hardware bitmaps may reject a software canvas.
+            sceneFrames.giveBack(bitmap)
+            if (!reportedDrawFailure) Log.w(TAG, "Unable to draw a VR window frame", failure)
+            reportedDrawFailure = true
+        }
+    }
+
+    private fun capturePanel() {
+        if (!VrSession.panelOpen) {
+            lastPanelSettings = null
+            return
+        }
+        val settings = VrSession.settings
+        val index = VrSession.selectedIndex
+        val editing = VrSession.editing
+        if (settings == lastPanelSettings && index == lastPanelIndex && editing == lastPanelEditing) return
+        val bitmap = panelFrames.obtain(PANEL_WIDTH, PANEL_HEIGHT)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(0, PorterDuff.Mode.CLEAR)
+        panel.layoutFor(PANEL_WIDTH, PANEL_HEIGHT)
+        panel.drawInto(canvas, settings, index, editing)
+        panelFrames.publish(bitmap)
+        lastPanelSettings = settings
+        lastPanelIndex = index
+        lastPanelEditing = editing
+    }
+
+    // Each bitmap is owned by just one thread. GL returns it after the upload.
+    private class Frames {
+        private var pending: Bitmap? = null
+        private var reusable: Bitmap? = null
+        private var closed = false
+
+        @Synchronized fun obtain(w: Int, h: Int): Bitmap {
+            val bitmap = reusable
+            reusable = null
+            if (bitmap != null) {
+                if (bitmap.width == w && bitmap.height == h) return bitmap
+                bitmap.recycle()
+            }
+            return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        }
+
+        @Synchronized fun publish(bitmap: Bitmap) {
+            pending?.let(::giveBack)
+            pending = bitmap
+        }
+
+        @Synchronized fun consume(): Bitmap? = pending.also { pending = null }
+
+        @Synchronized fun giveBack(bitmap: Bitmap) {
+            if (closed) bitmap.recycle() else {
+                reusable?.recycle()
+                reusable = bitmap
+            }
+        }
+
+        @Synchronized fun dropPending() {
+            pending?.let(::giveBack)
+            pending = null
+        }
+
+        @Synchronized fun close() {
+            closed = true
+            pending?.recycle()
+            reusable?.recycle()
+            pending = null
+            reusable = null
+        }
+    }
+
+    private companion object {
+        const val TAG = "VrWindowCapture"
+        const val FRAME_MS = 66L
+        const val MAX_SCENE_EDGE = 1920
+        const val PANEL_WIDTH = 1024
+        const val PANEL_HEIGHT = 576
+    }
 }

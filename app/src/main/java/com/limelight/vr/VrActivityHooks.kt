@@ -18,16 +18,18 @@ import android.view.accessibility.AccessibilityEvent
  * Activity without editing each Activity class. All 600+ existing screens keep
  * their own dispatchKeyEvent/onKeyDown logic; we simply get first refusal.
  */
-class VrActivityHooks(private val activity: Activity, private val delegate: Window.Callback) :
-    Window.Callback {
+class VrActivityHooks(
+    private val activity: Activity,
+    private val delegate: Window.Callback,
+    private val inDialog: Boolean = false,
+) : Window.Callback {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (VrInputDispatcher.dispatchKey(activity, event)) return true
-        return delegate.dispatchKeyEvent(event)
+        return VrInputDispatcher.dispatchKey(activity, event, inDialog, delegate::dispatchKeyEvent)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (VrInputDispatcher.dispatchMotion(activity, event)) return true
+        if (VrInputDispatcher.dispatchMotion(activity, event, inDialog, delegate::dispatchKeyEvent)) return true
         return delegate.dispatchGenericMotionEvent(event)
     }
 
