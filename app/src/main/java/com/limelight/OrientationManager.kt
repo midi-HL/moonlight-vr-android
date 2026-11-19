@@ -9,6 +9,7 @@ import android.os.Looper
 import android.view.Display
 import com.limelight.nvstream.NvConnection
 import com.limelight.preferences.PreferenceConfiguration
+import com.limelight.vr.VrSession
 
 /**
  * 管理串流 Activity 的屏幕旋转和方向同步。
@@ -54,6 +55,7 @@ class OrientationManager(
      * 始终基于 [originalWidth]/[originalHeight]，不受服务端运行时分辨率变更影响。
      */
     fun setPreferredOrientation() {
+        if (holdVrOrientation()) return
         val display = displayProvider()
 
         val desiredOrientation = when {
@@ -83,6 +85,7 @@ class OrientationManager(
      * - 用户物理旋转后通知服务端
      */
     fun onConfigurationChanged() {
+        if (holdVrOrientation()) return
         if (isServerInitiatedRotation) {
             // 服务端推送的旋转已到位，取消安全兜底定时器，立即恢复自由旋转
             handler.removeCallbacksAndMessages(null)
@@ -103,6 +106,7 @@ class OrientationManager(
      * - rotableScreen=false：若服务端方向与用户配置不匹配，重置服务端旋转
      */
     fun syncOrientationOnFirstFrame(serverWidth: Int, serverHeight: Int) {
+        if (holdVrOrientation()) return
         if (lastRotation != -1 || !connected) return
         val conn = connection ?: return
 
@@ -133,6 +137,7 @@ class OrientationManager(
      * - rotableScreen=false：重新设置用户配置的方向（不受服务端影响）
      */
     fun onServerResolutionChanged(isLandscape: Boolean) {
+        if (holdVrOrientation()) return
         if (rotableScreen) {
             handler.removeCallbacksAndMessages(null)
             isServerInitiatedRotation = true
@@ -141,6 +146,7 @@ class OrientationManager(
             else
                 ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
             handler.postDelayed({
+                if (holdVrOrientation()) return@postDelayed
                 isServerInitiatedRotation = false
                 activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
             }, SERVER_ROTATION_SETTLE_MS)
@@ -155,7 +161,7 @@ class OrientationManager(
     fun reset() {
         lastRotation = -1
         isServerInitiatedRotation = false
-        pendingRotationRunnable?.let { handler.removeCallbacks(it) }
+        handler.removeCallbacksAndMessages(null)
         pendingRotationRunnable = null
     }
 
@@ -167,6 +173,16 @@ class OrientationManager(
         pendingRotationRunnable = null
     }
 
+    /** Headset rotation changes the view, never the host desktop or the phone display axis. */
+    private fun holdVrOrientation(): Boolean {
+        if (!VrSession.enabled) return false
+        reset()
+        if (activity.requestedOrientation != ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        return true
+    }
+
     // ──────────────────────────────────────────────
     // 内部实现
     // ──────────────────────────────────────────────
@@ -175,6 +191,7 @@ class OrientationManager(
      * 检查客户端物理方向与服务端方向是否一致，不一致时通知服务端。
      */
     private fun checkAndSyncOrientation(serverWidth: Int, serverHeight: Int) {
+        if (holdVrOrientation()) return
         val display = displayProvider()
         if (display == null) {
             LimeLog.warning("checkAndSyncOrientation: display is null")
@@ -208,6 +225,7 @@ class OrientationManager(
      * 带 3 秒防抖，避免频繁通知。
      */
     private fun handleRotationChange() {
+        if (holdVrOrientation()) return
         val orientation = activity.resources.configuration.orientation
         val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
         val currentOrientation = if (isLandscape) 1 else 0
@@ -233,6 +251,7 @@ class OrientationManager(
 
         pendingRotationRunnable?.let { handler.removeCallbacks(it) }
         val runnable = Runnable {
+            if (holdVrOrientation()) return@Runnable
             LimeLog.info("handleRotationChange: notifying server, angle=$angle")
             conn.rotateDisplay(angle, object : NvConnection.DisplayRotationCallback {
                 override fun onSuccess(angle: Int) {

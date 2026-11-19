@@ -37,4 +37,25 @@ class VrFloatingWindowAlphaTest {
         state.update(0.5f, hidden = true)
         assertEquals(0.5f, state.update(0f, hidden = false))
     }
+
+    @Test
+    fun alphaAndBackgroundDimAreHiddenAndRestoredIndependently() {
+        val alpha = VrFloatingWindowAlpha()
+        val dim = VrFloatingWindowAlpha()
+        assertEquals(0f, alpha.update(0.8f, hidden = true))
+        assertEquals(0f, dim.update(0.45f, hidden = true))
+        assertNull(alpha.update(0f, hidden = true))
+        assertNull(dim.update(0f, hidden = true))
+        assertEquals(0.8f, alpha.update(0f, hidden = false))
+        assertEquals(0.45f, dim.update(0f, hidden = false))
+    }
+
+    @Test
+    fun aWindowWithoutBackgroundDimmingKeepsZeroDimOnRestore() {
+        val dim = VrFloatingWindowAlpha()
+        assertNull(dim.update(0f, hidden = true))
+        assertNull(dim.update(0f, hidden = false))
+        assertEquals(0f, dim.update(0.2f, hidden = true))
+        assertEquals(0.2f, dim.update(0f, hidden = false))
+    }
 }

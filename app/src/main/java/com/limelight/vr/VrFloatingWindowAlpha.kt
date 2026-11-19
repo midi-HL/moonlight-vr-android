@@ -1,6 +1,6 @@
 package com.limelight.vr
 
-/** Saves WindowManager alpha; View alpha is deliberately untouched for offscreen capture. */
+/** Reversibly hides a WindowManager opacity value, used independently for alpha and dimAmount. */
 internal class VrFloatingWindowAlpha {
     private var original: Float? = null
 

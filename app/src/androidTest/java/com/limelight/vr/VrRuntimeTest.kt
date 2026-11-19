@@ -20,6 +20,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class VrRuntimeTest {
@@ -108,6 +110,64 @@ class VrRuntimeTest {
             }
         } finally {
             VrSettingsStore.save(context, original)
+        }
+    }
+
+    @Test fun quickControlsRenderInBothEyesAtExtremeSceneSettings() {
+        val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
+        val scenario = ActivityScenario.launch<PcView>(Intent(context, PcView::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            scenario.onActivity { activity ->
+                VrSession.setEnabled(activity, true)
+                VrSession.updateSettings(activity, VrSession.settings.copy(
+                    headTrackingEnabled = false, screenScale = 0.5f, screenDistanceMeters = 5f,
+                    brightness = 0.3f, curvature = 1f, zoomScale = 2.5f))
+                VrSession.setPanelOpen(true)
+                VrSession.setSelectedIndex(2)
+            }
+            val complete = CountDownLatch(1)
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val deadline = SystemClock.uptimeMillis() + 15000L
+            var visibleInBothEyes = false
+            val frameCheck = object : Runnable {
+                override fun run() {
+                    val captured = instrumentation.uiAutomation.takeScreenshot()
+                    val frame = captured?.copy(Bitmap.Config.ARGB_8888, false)
+                    captured?.recycle()
+                    if (frame != null) {
+                        var left = 0
+                        var right = 0
+                        for (y in 0 until frame.height step 2) for (x in 0 until frame.width step 2) {
+                            val pixel = frame.getPixel(x, y)
+                            val red = android.graphics.Color.red(pixel)
+                            val green = android.graphics.Color.green(pixel)
+                            val blue = android.graphics.Color.blue(pixel)
+                            if (red in 125..160 && green in 215..250 && blue in 190..230) {
+                                if (x < frame.width / 2) left++ else right++
+                            }
+                        }
+                        visibleInBothEyes = frame.width > frame.height && left > 20 && right > 20
+                        if (visibleInBothEyes || SystemClock.uptimeMillis() >= deadline) {
+                            save(frame, "stereo-controls-extreme-scene.png")
+                            frame.recycle()
+                            complete.countDown()
+                            return
+                        }
+                        frame.recycle()
+                    }
+                    if (SystemClock.uptimeMillis() >= deadline) complete.countDown()
+                    else handler.postDelayed(this, 200L)
+                }
+            }
+            handler.post(frameCheck)
+            assertTrue("Timed out waiting for a rendered stereo frame", complete.await(20, TimeUnit.SECONDS))
+            handler.removeCallbacks(frameCheck)
+            assertTrue("The head-relative controls must stay visible in both eyes", visibleInBothEyes)
+        } finally {
+            instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
+            scenario.close()
         }
     }
 

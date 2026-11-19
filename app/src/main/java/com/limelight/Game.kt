@@ -817,6 +817,14 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
                 (vrPresentationPrepared || connected || prefConfig.videoFormat != PreferenceConfiguration.FormatOption.FORCE_PYROWAVE)
             )
 
+    /** Recompute the 2D preference after a VR entry that may predate this Activity. */
+    internal fun restore2dOrientationAfterVr() {
+        if (::orientationManager.isInitialized) {
+            orientationManager.reset()
+            orientationManager.setPreferredOrientation()
+        }
+    }
+
     private fun defaultPreferences(): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(this)
 

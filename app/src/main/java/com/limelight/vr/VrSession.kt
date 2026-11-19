@@ -280,6 +280,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val decor: WeakReference<View>,
         val window: WeakReference<Window>?,
         val alpha: VrFloatingWindowAlpha = VrFloatingWindowAlpha(),
+        val dim: VrFloatingWindowAlpha = VrFloatingWindowAlpha(),
     )
     private val dialogDecors = ArrayList<DialogWindow>()
 
@@ -311,7 +312,9 @@ object VrSession : Application.ActivityLifecycleCallbacks {
                 }
 
                 override fun onViewDetachedFromWindow(view: View) {
-                    updateFloatingWindow(entry, forceVisible = true)
+                    // View still reports attached inside this callback. Dialog.dismiss()
+                    // is already removing it, so only restore the saved attributes in memory.
+                    updateFloatingWindow(entry, forceVisible = true, notifyWindow = false)
                 }
             })
         }
@@ -322,20 +325,31 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         onWindowDirty?.invoke()
     }
 
-    private fun updateFloatingWindow(entry: DialogWindow, forceVisible: Boolean = false) {
+    private fun updateFloatingWindow(
+        entry: DialogWindow,
+        forceVisible: Boolean = false,
+        notifyWindow: Boolean = true,
+    ) {
         val owner = entry.owner.get() ?: return
         val decor = entry.decor.get() ?: return
         val hidden = !forceVisible && enabled && activeActivity === owner && decor.isAttachedToWindow
         val window = entry.window?.get()
         if (window != null) {
             val attributes = window.attributes
-            val alpha = entry.alpha.update(attributes.alpha, hidden) ?: return
-            window.attributes = attributes.also { it.alpha = alpha }
+            val alpha = entry.alpha.update(attributes.alpha, hidden)
+            val dim = entry.dim.update(attributes.dimAmount, hidden)
+            if (alpha == null && dim == null) return
+            if (alpha != null) attributes.alpha = alpha
+            if (dim != null) attributes.dimAmount = dim
+            if (notifyWindow && decor.isAttachedToWindow) window.attributes = attributes
         } else {
             val attributes = decor.layoutParams as? WindowManager.LayoutParams ?: return
-            val alpha = entry.alpha.update(attributes.alpha, hidden) ?: return
-            attributes.alpha = alpha
-            if (decor.isAttachedToWindow) {
+            val alpha = entry.alpha.update(attributes.alpha, hidden)
+            val dim = entry.dim.update(attributes.dimAmount, hidden)
+            if (alpha == null && dim == null) return
+            if (alpha != null) attributes.alpha = alpha
+            if (dim != null) attributes.dimAmount = dim
+            if (notifyWindow && decor.isAttachedToWindow) {
                 val manager = owner.getSystemService(Context.WINDOW_SERVICE) as WindowManager
                 manager.updateViewLayout(decor, attributes)
             }
@@ -638,7 +652,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     /** Restore any activity that had a VR overlay in this session. */
     private fun restoreAllWindows() {
-        windowStates.keys.toList().forEach(::restoreWindow)
+        val activities = windowStates.keys.toList()
+        activities.forEach(::restoreWindow)
+        // Game can have been created with VR already active, so its saved snapshot
+        // may itself be SENSOR_LANDSCAPE rather than the user's normal 2D preference.
+        activities.filterIsInstance<com.limelight.Game>().forEach { it.restore2dOrientationAfterVr() }
     }
 
     private fun Activity.hasFloatingOrTranslucentWindow(): Boolean {
