@@ -367,6 +367,25 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         entry.decor.get()?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
     }
 
+    internal data class CapturedFloatingWindow(val decor: View, val alpha: Float, val dimAmount: Float)
+
+    /** Refresh hidden native attributes and retain their original opacity in the projected copy. */
+    internal fun captureFloatingWindows(source: View): List<CapturedFloatingWindow> = dialogDecors.mapNotNull { entry ->
+        if (entry.owner.get()?.window?.decorView !== source) return@mapNotNull null
+        val decor = entry.decor.get()?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
+            ?: return@mapNotNull null
+        // GameMenu can change Window.alpha from its opacity slider between capture ticks.
+        updateFloatingWindow(entry)
+        val attributes = entry.window?.get()?.attributes
+            ?: (decor.layoutParams as? WindowManager.LayoutParams)
+        val alpha = entry.alpha.valueForCapture(attributes?.alpha ?: 1f)
+            .takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
+        val dim = if (attributes != null && attributes.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND != 0) {
+            entry.dim.valueForCapture(attributes.dimAmount).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+        } else 0f
+        CapturedFloatingWindow(decor, alpha, dim)
+    }
+
     private fun findActivity(context: Context): Activity? = when (context) {
         is Activity -> context
         is ContextWrapper -> context.baseContext?.takeIf { it !== context }?.let(::findActivity)

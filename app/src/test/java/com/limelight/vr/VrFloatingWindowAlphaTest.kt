@@ -58,4 +58,25 @@ class VrFloatingWindowAlphaTest {
         assertEquals(0f, dim.update(0.2f, hidden = true))
         assertEquals(0.2f, dim.update(0f, hidden = false))
     }
+
+    @Test
+    fun projectedCopyUsesOriginalOpacityWhileNativeWindowIsHidden() {
+        val alpha = VrFloatingWindowAlpha()
+        assertEquals(0.8f, alpha.valueForCapture(0.8f))
+        alpha.update(0.8f, hidden = true)
+        assertEquals(0.8f, alpha.valueForCapture(0f))
+        alpha.update(0.45f, hidden = true)
+        assertEquals(0.45f, alpha.valueForCapture(0f))
+        alpha.update(0f, hidden = false)
+        assertEquals(0.6f, alpha.valueForCapture(0.6f))
+    }
+
+    @Test
+    fun projectedDimUsesSavedNativeDimUntilRestored() {
+        val dim = VrFloatingWindowAlpha()
+        dim.update(0.35f, hidden = true)
+        assertEquals(0.35f, dim.valueForCapture(0f))
+        assertEquals(0.35f, dim.update(0f, hidden = false))
+        assertEquals(0f, dim.valueForCapture(0f))
+    }
 }

@@ -2,6 +2,7 @@ package com.limelight.vr
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.PorterDuff
 import android.os.Handler
 import android.os.Looper
@@ -82,9 +83,16 @@ class VrWindowCapture(
             // visibility to exclude it: that can tear down the producer Surface.
             source.draw(canvas)
             source.getLocationOnScreen(sourceLocation)
-            VrSession.activeDialogDecors(source).forEach { dialog ->
+            VrSession.captureFloatingWindows(source).forEach { floating ->
+                val dialog = floating.decor
                 dialog.getLocationOnScreen(dialogLocation)
-                val checkpoint = canvas.save()
+                if (floating.dimAmount > 0f) {
+                    canvas.drawColor(Color.argb((floating.dimAmount * 255f).roundToInt(), 0, 0, 0))
+                }
+                val opacity = (floating.alpha * 255f).roundToInt()
+                val checkpoint = if (opacity < 255) {
+                    canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), opacity)
+                } else canvas.save()
                 try {
                     canvas.translate((dialogLocation[0] - sourceLocation[0]).toFloat(),
                         (dialogLocation[1] - sourceLocation[1]).toFloat())

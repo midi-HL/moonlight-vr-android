@@ -4,6 +4,9 @@ package com.limelight.vr
 internal class VrFloatingWindowAlpha {
     private var original: Float? = null
 
+    /** The offscreen copy retains the caller's opacity while the native window is hidden. */
+    fun valueForCapture(current: Float): Float = original ?: current
+
     fun update(current: Float, hidden: Boolean): Float? {
         if (hidden) {
             // A caller may adjust its window's opacity after showing it.
