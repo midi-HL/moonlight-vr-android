@@ -233,6 +233,11 @@ class VrGamepadRouter {
             isPressed(deviceId, VrKeys.BUTTON_MODE)
 
     companion object {
+        /** Keep DOWN/UP classification stable across a VR or menu visibility transition. */
+        fun isControllerKeyCode(keyCode: Int): Boolean =
+            keyCode in VrKeys.BUTTON_A..VrKeys.BUTTON_MODE ||
+                keyCode in VrKeys.FOCUS_KEYS || keyCode == VrKeys.ENTER
+
         /** Source mask check without importing android.view.InputDevice. */
         fun isGamepad(source: Int): Boolean =
             source and VrKeys.SOURCE_GAMEPAD == VrKeys.SOURCE_GAMEPAD ||

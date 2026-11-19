@@ -137,6 +137,26 @@ jobs:
           pcview = (root / 'app/src/main/java/com/limelight/PcView.kt').read_text(encoding='utf-8')
           if 'Gravity.CENTER_HORIZONTAL or android.view.Gravity.BOTTOM' not in pcview:
               sys.exit('FAIL: VR entry button is not centred (P-F2 regression)')
+          game = (root / 'app/src/main/java/com/limelight/Game.kt').read_text(encoding='utf-8')
+          accessibility_key = game.split('override fun onKeyEvent(event: KeyEvent)', 1)[1].split(
+              'override fun onRequestPermissionsResult', 1)[0]
+          if 'VrInputDispatcher.dispatchKey(this, event, inDialog = false)' not in accessibility_key:
+              sys.exit('FAIL: Accessibility key events bypass VR input routing')
+          if not re.search(r'finally\s*{\s*isEventFromAccessibilityService\s*=\s*false', accessibility_key):
+              sys.exit('FAIL: Accessibility event attribution must be cleared in finally')
+          if (accessibility_key.count('onKeyDown(forwarded.keyCode, forwarded)') != 1 or
+                  accessibility_key.count('onKeyUp(forwarded.keyCode, forwarded)') != 1):
+              sys.exit('FAIL: Accessibility keys must have one original Game delivery per action')
+          focus_changed = game.split('override fun onWindowFocusChanged(hasFocus: Boolean)', 1)[1].split(
+              'private fun selectDisplayModeForRendering', 1)[0]
+          if ('updateKeyboardInterception()' not in focus_changed or
+                  'val intercepting = streamInForeground && hasWindowFocus() && !overlayVisible' not in game):
+              sys.exit('FAIL: Keyboard accessibility capture must yield to focused dialogs and popups')
+          dispatcher = (root / 'app/src/main/java/com/limelight/vr/VrInputDispatcher.kt').read_text(encoding='utf-8')
+          key_classification = dispatcher.split('internal fun isControllerKey(', 1)[1].split('fun dispatchKey(', 1)[0]
+          if ('VrGamepadRouter.isControllerKeyCode(event.keyCode)' not in key_classification or
+                  'VrSession.panelOpen' in key_classification or 'VrSession.enabled' in key_classification):
+              sys.exit('FAIL: Controller key classification must remain stable across VR/menu transitions')
           print('VR wiring guards passed (%d keys reconciled)' % len(keys))
           PY
 

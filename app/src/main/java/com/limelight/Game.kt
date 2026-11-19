@@ -1557,12 +1557,19 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
     override fun onKeyEvent(event: KeyEvent) {
         isEventFromAccessibilityService = true
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            onKeyDown(event.keyCode, event)
-        } else if (event.action == KeyEvent.ACTION_UP) {
-            onKeyUp(event.keyCode, event)
+        try {
+            // Accessibility filtering runs before Window.Callback. Reuse the VR
+            // route, then deliver directly to the original Game handlers once.
+            com.limelight.vr.VrInputDispatcher.dispatchKey(this, event, inDialog = false) { forwarded ->
+                when (forwarded.action) {
+                    KeyEvent.ACTION_DOWN -> onKeyDown(forwarded.keyCode, forwarded)
+                    KeyEvent.ACTION_UP -> onKeyUp(forwarded.keyCode, forwarded)
+                    else -> false
+                }
+            }
+        } finally {
+            isEventFromAccessibilityService = false
         }
-        isEventFromAccessibilityService = false
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
@@ -1808,8 +1815,9 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        keyboardInputHandler.clearModifierState()
-        inputCaptureProvider.onWindowFocusChanged(hasFocus)
+        if (::keyboardInputHandler.isInitialized) keyboardInputHandler.clearModifierState()
+        if (::inputCaptureProvider.isInitialized) inputCaptureProvider.onWindowFocusChanged(hasFocus)
+        updateKeyboardInterception()
         if (hasFocus) {
             // Android only delivers OnPrimaryClipChangedListener events while
             // the app holds input focus; clips copied in another app while
@@ -2006,8 +2014,8 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     private fun updateKeyboardInterception() {
         val overlayVisible = hasNativeGameMenu() || Dialog.hasVisibleDialog() ||
             hostUnlockController?.isOverlayVisible == true
-        val intercepting = streamInForeground && !overlayVisible
-        if (!intercepting && KeyboardAccessibilityService.interceptingEnabled) {
+        val intercepting = streamInForeground && hasWindowFocus() && !overlayVisible
+        if (!intercepting && KeyboardAccessibilityService.interceptingEnabled && ::keyboardInputHandler.isInitialized) {
             keyboardInputHandler.releaseForwardedKeys()
         }
         KeyboardAccessibilityService.setIntercepting(intercepting)

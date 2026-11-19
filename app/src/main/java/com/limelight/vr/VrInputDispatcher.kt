@@ -12,9 +12,7 @@ object VrInputDispatcher {
     internal fun isControllerKey(event: KeyEvent): Boolean =
         VrGamepadRouter.isGamepad(event.source) ||
             VrGamepadRouter.isGamepad(event.device?.sources ?: 0) ||
-            event.keyCode in KeyEvent.KEYCODE_BUTTON_A..KeyEvent.KEYCODE_BUTTON_MODE ||
-            (VrSession.enabled && event.keyCode in VrKeys.FOCUS_KEYS) ||
-            (VrSession.panelOpen && event.keyCode == VrKeys.ENTER)
+            VrGamepadRouter.isControllerKeyCode(event.keyCode)
 
     fun dispatchKey(
         activity: Activity,
