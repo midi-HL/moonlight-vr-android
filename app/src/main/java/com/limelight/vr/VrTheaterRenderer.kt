@@ -142,13 +142,12 @@ class VrTheaterRenderer(
     private var zoomSnapshotMode = -1 // -1 = not probed, -2 = readPixels, 0..2 = copy format
     private var zoomTexW = 0
     private var zoomTexH = 0
-    // Framebuffer copies start at the bottom-left. The UV buffer is remapped for a centered crop.
+    // Framebuffer copies start at the bottom-left. Each half-screen eye is cropped around its own center.
     private val zoomQuad = direct(floatArrayOf(-1f, -1f, 0f, 1f, -1f, 0f, -1f, 1f, 0f, 1f, 1f, 0f))
     private val zoomUv = direct(FloatArray(8))
     private val alignmentLine = direct(floatArrayOf(-.003f, -1f, 0f, .003f, -1f, 0f, -.003f, 0f, 0f, .003f, 0f, 0f))
     private val unitUv = direct(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
     private var zoomReadback: ByteBuffer? = null
-    private var lastZoomScale = Float.NaN
     private var unsupportedZoomWidth = 0
     private var unsupportedZoomHeight = 0
     private var zoomLoggedActive = false
@@ -530,21 +529,33 @@ class VrTheaterRenderer(
             }
         }
 
-        if (lastZoomScale != zoom) {
-            // Full viewport with a centered UV crop scales evenly without exceeding GL viewport limits.
-            val inset = (1f - 1f / zoom) / 2f
-            val end = 1f - inset
-            zoomUv.put(0, inset).put(1, inset).put(2, end).put(3, inset)
-            zoomUv.put(4, inset).put(5, end).put(6, end).put(7, end)
-            lastZoomScale = zoom
-        }
-        GLES20.glViewport(viewport.x, viewport.y, w, h)
+        val leftWidth = w / 2
+        val rightWidth = w - leftWidth
+        if (leftWidth <= 0 || rightWidth <= 0) return noteZoomSkip("viewport is too narrow for stereo")
+        val verticalInset = (1f - 1f / zoom) / 2f
+        val v0 = verticalInset
+        val v1 = 1f - verticalInset
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
-        drawQuad(hProgram, identity, 1f, GLES20.GL_TEXTURE_2D, zoomTextureId, zoomQuad, zoomUv, 4)
+        // The composed framebuffer contains left and right eyes side by side. A single full-width
+        // crop moves both eye centers outward; crop each half around its own optical center instead.
+        var eyeStart = 0
+        for (eyeWidth in intArrayOf(leftWidth, rightWidth)) {
+            val u0 = eyeStart.toFloat() / w
+            val u1 = (eyeStart + eyeWidth).toFloat() / w
+            val eyeCenter = (u0 + u1) / 2f
+            val halfRange = (u1 - u0) / (2f * zoom)
+            val left = eyeCenter - halfRange
+            val right = eyeCenter + halfRange
+            zoomUv.put(0, left).put(1, v0).put(2, right).put(3, v0)
+            zoomUv.put(4, left).put(5, v1).put(6, right).put(7, v1)
+            GLES20.glViewport(viewport.x + eyeStart, viewport.y, eyeWidth, h)
+            drawQuad(hProgram, identity, 1f, GLES20.GL_TEXTURE_2D, zoomTextureId, zoomQuad, zoomUv, 4)
+            eyeStart += eyeWidth
+        }
         if (takeGlErrors()) return noteZoomSkip("snapshot draw failed")
         if (!zoomLoggedActive) {
             zoomLoggedActive = true

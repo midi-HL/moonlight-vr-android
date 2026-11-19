@@ -209,7 +209,12 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     private val backPresses = HashMap<Int, Long>()
 
     /** Returns true when the event was consumed by the VR layer. */
-    fun onKeyEvent(event: KeyEvent, isControllerKey: Boolean, backOwnedByHost: Boolean): Boolean {
+    fun onKeyEvent(
+        event: KeyEvent,
+        isControllerKey: Boolean,
+        backOwnedByHost: Boolean,
+        captureUiMenuKeys: Boolean = false,
+    ): Boolean {
         // A focused Android dialog or controller in Game owns BACK until the VR panel is opened.
         if (event.keyCode == VrKeys.BACK && (!backOwnedByHost || panelOpen || event.deviceId in backPresses)) {
             when (event.action) {
@@ -228,7 +233,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
             }
         }
         return handle(router.onKey(event.keyCode, event.action, isControllerKey,
-            event.deviceId, event.repeatCount > 0))
+            event.deviceId, event.repeatCount > 0, captureUiMenuKeys))
     }
 
     fun onBackInvoked(): Boolean {

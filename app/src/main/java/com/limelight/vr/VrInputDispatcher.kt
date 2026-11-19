@@ -23,7 +23,8 @@ object VrInputDispatcher {
         val controllerKey = isControllerKey(event)
         // BACK from a controller can be the game's legacy SELECT button.
         val backOwnedByHost = inDialog || (activity is Game && activity.connected && controllerKey)
-        if (VrSession.onKeyEvent(event, controllerKey, backOwnedByHost)) return true
+        if (VrSession.onKeyEvent(event, controllerKey, backOwnedByHost,
+                captureUiMenuKeys = activity !is Game || inDialog)) return true
         if (!VrSession.enabled || !controllerKey || activity is Game) return deliver(event)
 
         // Existing Android dialogs may own Button B via OnKeyListener. A fallback

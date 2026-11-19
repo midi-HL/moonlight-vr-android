@@ -60,8 +60,14 @@ class VrRuntimeTest {
         val scenario = ActivityScenario.launch<PcView>(launch)
         var dialog: AlertDialog? = null
         var confirmedFromRealDpad = false
+        var leakedUiMenuKey = false
         var originalDialogAlpha = 1f
         var originalDialogDim = 0f
+        fun injectGamepadKey(keyCode: Int, action: Int, downTime: Long) {
+            val event = KeyEvent(downTime, SystemClock.uptimeMillis(), action, keyCode,
+                0, 0, -1, 0, 0, InputDevice.SOURCE_GAMEPAD)
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+        }
         try {
             scenario.onActivity { activity ->
                 assertTrue("Device must support the bundled Cardboard runtime", VrSession.isSupported())
@@ -90,6 +96,11 @@ class VrRuntimeTest {
                     setOnClickListener { confirmedFromRealDpad = true }
                     requestFocus()
                 }
+                openedDialog.setOnKeyListener { _, keyCode, _ ->
+                    if (keyCode in listOf(KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+                            KeyEvent.KEYCODE_BUTTON_MODE)) leakedUiMenuKey = true
+                    false
+                }
                 VrSession.registerDialog(openedDialog)
             }
             waitForUiCondition("Projected dialog did not retain a real input-focused window") {
@@ -98,6 +109,26 @@ class VrRuntimeTest {
                 dialog?.isShowing == true && root != null && root.isAttachedToWindow && root.isLaidOut &&
                     root.hasWindowFocus() && dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.hasFocus() == true &&
                     alpha > 0f && alpha <= 0.001f
+            }
+            val chordTime = SystemClock.uptimeMillis()
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_START, KeyEvent.ACTION_DOWN, chordTime)
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.ACTION_DOWN, chordTime)
+            waitForUiCondition("A real menu chord did not open VR controls above the dialog") {
+                VrSession.panelOpen
+            }
+            // Releasing START must not produce its Android DPAD_CENTER fallback behind the panel.
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_START, KeyEvent.ACTION_UP, chordTime)
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.ACTION_UP, chordTime)
+            scenario.onActivity {
+                assertTrue(VrSession.panelOpen)
+                assertFalse("Menu chord keys must not reach native UI fallback handling", leakedUiMenuKey)
+                assertFalse("Opening VR controls must not activate the dialog's focused button", confirmedFromRealDpad)
+            }
+            val closeTime = SystemClock.uptimeMillis()
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_B, KeyEvent.ACTION_DOWN, closeTime)
+            injectGamepadKey(KeyEvent.KEYCODE_BUTTON_B, KeyEvent.ACTION_UP, closeTime)
+            waitForUiCondition("B did not close VR controls while keeping the dialog usable") {
+                !VrSession.panelOpen && dialog?.isShowing == true && dialog?.window?.decorView?.hasWindowFocus() == true
             }
             // Native input injection runs off the UI thread and goes through InputDispatcher,
             // so a completely transparent NOT_VISIBLE window cannot make this test falsely pass.

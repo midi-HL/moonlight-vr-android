@@ -79,6 +79,7 @@ class VrGamepadRouter {
         isGamepadSource: Boolean,
         deviceId: Int = 0,
         isRepeat: Boolean = false,
+        captureUiMenuKeys: Boolean = false,
     ): Command {
         val button = Button(deviceId, keyCode)
         if (action == VrKeys.ACTION_UP) {
@@ -121,6 +122,13 @@ class VrGamepadRouter {
             return Command.PassThrough
         }
 
+        // START has an Android DPAD_CENTER fallback; SELECT/MODE fall back to MENU/HOME.
+        // UI windows reserve these keys from their first DOWN, while live Game retains
+        // short START/SELECT input. UP ownership stays with the original DOWN context.
+        val capturedUiMenuKey = captureUiMenuKeys && (keyCode == VrKeys.BUTTON_START ||
+            keyCode == VrKeys.BUTTON_SELECT || keyCode == VrKeys.BUTTON_MODE)
+        if (capturedUiMenuKey) captured.add(button)
+
         // START+SELECT / HOME: arm the long-press on the DOWN edge that completes it.
         if (!wasMenuActive && menuHoldActive(deviceId) && menuDevice == null && !panelOpen) {
             menuDevice = deviceId
@@ -140,7 +148,7 @@ class VrGamepadRouter {
                 else -> Command.Consumed
             }
         }
-        return Command.PassThrough
+        return if (capturedUiMenuKey) Command.Consumed else Command.PassThrough
     }
 
     fun onAxis(x: Float, y: Float, timeMs: Long): Command {

@@ -87,6 +87,10 @@ class VrVideoOrientationRuntimeTest {
             val zoomed = awaitPixels("video-zoom-135-upright.png") { frame ->
                 frame.upright(false) && frame.eyes.indices.all {
                     frame.separation(it) > upright.separation(it) * 1.1
+                } && frame.eyes.indices.all { eye ->
+                    val originalCenter = upright.eyes[eye].map { it.x }.average()
+                    val zoomedCenter = frame.eyes[eye].map { it.x }.average()
+                    abs(originalCenter - zoomedCenter) < upright.separation(eye) * 0.05
                 }
             }
             scenario.onActivity { VrSession.updateSettings(it, VrSession.settings.copy(
