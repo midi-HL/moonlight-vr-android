@@ -118,13 +118,8 @@ class VrHostInputRuntimeTest {
                 val downTime = SystemClock.uptimeMillis()
                 val down = keyEvent(downTime, KeyEvent.ACTION_DOWN, device.id)
                 val up = keyEvent(downTime, KeyEvent.ACTION_UP, device.id)
-                try {
-                    assertEquals(true, handler.handleKeyDown(down))
-                    assertEquals(true, handler.handleKeyUp(up))
-                } finally {
-                    down.recycle()
-                    up.recycle()
-                }
+                assertEquals(true, handler.handleKeyDown(down))
+                assertEquals(true, handler.handleKeyUp(up))
 
                 assertEquals(2, connection.keyboardPackets.size)
                 assertEquals(KeyboardPacket.KEY_DOWN, connection.keyboardPackets[0].direction)
