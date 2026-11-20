@@ -490,12 +490,15 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         syncFloatingWindows()
         val activity = activeActivity ?: return
         if (enabled) {
+            // Lock the destination window before creating Cardboard's SurfaceView. Creating the
+            // GL host first lets a newly resumed Activity expose its default portrait window for
+            // a frame while the landscape request is still being applied.
+            applyImmersive(activity)
             if (activeHost == null) {
                 val decor = activity.window.decorView as? ViewGroup ?: return
                 val host = VrOverlayHost(activity, decor)
                 host.install()
                 activeHost = host
-                applyImmersive(activity)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && systemBackRegistration == null) {
                 systemBackRegistration = SystemBackRegistration(activity)
@@ -564,6 +567,9 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         if (delegate !is VrActivityHooks) {
             window.callback = VrActivityHooks(activity, delegate)
         }
+        // Apply the settled VR window contract before the first resume/draw callback. This closes
+        // the portrait flash window when navigating between PcView, settings and Game.
+        if (enabled) applyImmersive(activity)
     }
 
     override fun onActivityStarted(activity: Activity) = Unit

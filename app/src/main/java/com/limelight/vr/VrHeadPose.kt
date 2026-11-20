@@ -17,18 +17,18 @@ object VrHeadPose {
     /**
      * @param quaternion (x, y, z, w) as produced by HeadTransform.getQuaternion(float[], 0)
      * @param sensitivity 0 = fixed view (identity), 1 = exact head rotation, >1 = amplified
-     * @return column-major 4x4 rotation matrix suitable for eyeFromHead * rotation
+     * @return column-major 4x4 forward rotation matrix. Renderers that build a view matrix
+     * should use [viewRotationInto], which inverts this rotation first.
      */
     fun scaledRotation(quaternion: FloatArray, sensitivity: Float): FloatArray =
         scaledRotationInto(FloatArray(VrMatrix4.SIZE), quaternion, sensitivity)
 
     /**
-     * Zero-allocation VIEW rotation = inverse of [scaledRotationInto].
+     * Zero-allocation view rotation = inverse of the forward head-pose quaternion.
      *
-     * Cardboard's `HeadTransform.getHeadView()` is the camera-to-head (inverse) transform, and
-     * `CardboardView.Eye.applyHeadView()` computes `eyeFromHead * headView`. Using the FORWARD
-     * rotation as the view matrix makes the screen follow the head instead of staying fixed in
-     * space (no depth / "stuck to your face"). VrTheaterRenderer must use this function.
+     * The bundled HeadTransform extracts its quaternion with the opposite off-diagonal signs
+     * to OpenGL's column-major view matrix. It therefore describes head-to-world rotation.
+     * Invert it once to obtain the world-to-head view used by Eye.applyHeadView().
      */
     fun viewRotationInto(out: FloatArray, quaternion: FloatArray, sensitivity: Float): FloatArray {
         scaledRotationInto(out, quaternion, sensitivity)
@@ -37,17 +37,31 @@ object VrHeadPose {
 
     /**
      * Computes the relative rotation from [centerQuaternion] to [currentQuaternion], applies
-     * [sensitivity], and writes the VIEW matrix (inverse of the forward rotation) into [out].
+     * [sensitivity], and writes the relative VIEW matrix into [out].
      * This is used for "recenter" — the stored center orientation becomes the new forward.
      */
     fun viewRotationInto(out: FloatArray,
                          currentQuaternion: FloatArray,
                          centerQuaternion: FloatArray,
                          sensitivity: Float): FloatArray {
-        // relative = inverse(center) * current  =>  current * centerConj
-        val tmp = FloatArray(4)
-        quatMultiplyConj(tmp, currentQuaternion, centerQuaternion)
-        return viewRotationInto(out, tmp, sensitivity)
+        return viewRotationInto(out, currentQuaternion, centerQuaternion, sensitivity, FloatArray(4))
+    }
+
+    /**
+     * Zero-allocation overload for a renderer that owns a scratch quaternion on its GL thread.
+     * [scratchQuaternion] must not be shared with another concurrent render invocation.
+     */
+    fun viewRotationInto(out: FloatArray,
+                         currentQuaternion: FloatArray,
+                         centerQuaternion: FloatArray,
+                         sensitivity: Float,
+                         scratchQuaternion: FloatArray): FloatArray {
+        require(scratchQuaternion.size >= 4) { "scratchQuaternion needs 4 components" }
+        // Relative forward pose = inverse(center) * current; its inverse gives
+        // currentView * inverse(centerView). Reversing this order rotates the motion axes
+        // into the old world basis (e.g. pitch becomes roll after a 90-degree center yaw).
+        quatConjugateMultiply(scratchQuaternion, centerQuaternion, currentQuaternion)
+        return viewRotationInto(out, scratchQuaternion, sensitivity)
     }
 
     /** Zero-allocation variant. Writes the rotation into [out] and returns it. */
@@ -87,14 +101,13 @@ object VrHeadPose {
         return VrMatrix4.rotationInto(out, x / sinHalf, y / sinHalf, z / sinHalf, angle * sensitivity)
     }
 
-    /** q1 * conjugate(q2) into [out] (both length-4: x,y,z,w). */
-    private fun quatMultiplyConj(out: FloatArray, q1: FloatArray, q2: FloatArray) {
+    /** conjugate(q1) * q2 into [out] (both length-4: x,y,z,w). */
+    private fun quatConjugateMultiply(out: FloatArray, q1: FloatArray, q2: FloatArray) {
         val x1 = q1[0]; val y1 = q1[1]; val z1 = q1[2]; val w1 = q1[3]
         val x2 = q2[0]; val y2 = q2[1]; val z2 = q2[2]; val w2 = q2[3]
-        // conjugate(q2) = (-x2, -y2, -z2, w2)
-        out[0] =  w1 * -x2 + x1 * w2 + y1 * -z2 - z1 * -y2  // w1*(-x2) + x1*w2 + y1*(-z2) - z1*(-y2)
-        out[1] =  w1 * -y2 - x1 * -z2 + y1 * w2 + z1 * -x2  // w1*(-y2) - x1*(-z2) + y1*w2 + z1*(-x2)
-        out[2] =  w1 * -z2 + x1 * -y2 - y1 * -x2 + z1 * w2  // w1*(-z2) + x1*(-y2) - y1*(-x2) + z1*w2
-        out[3] =  w1 * w2  - x1 * -x2 - y1 * -y2 - z1 * -z2  // w1*w2 - x1*(-x2) - y1*(-y2) - z1*(-z2)
+        out[0] = w1 * x2 - x1 * w2 - y1 * z2 + z1 * y2
+        out[1] = w1 * y2 + x1 * z2 - y1 * w2 - z1 * x2
+        out[2] = w1 * z2 - x1 * y2 + y1 * x2 - z1 * w2
+        out[3] = w1 * w2 + x1 * x2 + y1 * y2 + z1 * z2
     }
 }

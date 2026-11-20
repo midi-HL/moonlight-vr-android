@@ -39,8 +39,7 @@ object VrMatrix4 {
      * Zero-allocation transpose of the upper-left 3x3 block of a pure rotation matrix, i.e. its
      * inverse (R^-1 == R^T for rotations). [out] may alias [src].
      *
-     * Cardboard SDK's `HeadTransform.getHeadView()` is the inverse (camera-to-head) transform;
-     * VrHeadPose.viewRotationInto() uses this to build a correct view matrix.
+     * VrHeadPose uses this to invert Cardboard's forward head quaternion into a view rotation.
      */
     fun transposeRotationInto(out: FloatArray, src: FloatArray): FloatArray {
         require(out.size == SIZE && src.size == SIZE) { "4x4 matrices required" }

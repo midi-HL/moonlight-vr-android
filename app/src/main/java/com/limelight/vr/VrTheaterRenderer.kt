@@ -125,6 +125,7 @@ class VrTheaterRenderer(
     private val headQuaternion = FloatArray(4)
     private val nextHeadQuaternion = FloatArray(4)
     private val centerQuaternion = FloatArray(4).also { it[3] = 1f }
+    private val relativeQuaternionScratch = FloatArray(4)
     private var hasHeadPose = false
     private var recenterPending = false
     private val headRotation = FloatArray(16)
@@ -310,7 +311,10 @@ class VrTheaterRenderer(
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         if (vertexCount != 0) {
             val head = if (s.headTrackingEnabled && hasHeadPose) {
-                VrHeadPose.viewRotationInto(headRotation, headQuaternion, centerQuaternion, s.headTrackingSensitivity)
+                VrHeadPose.viewRotationInto(
+                    headRotation, headQuaternion, centerQuaternion, s.headTrackingSensitivity,
+                    relativeQuaternionScratch,
+                )
             } else identity
             VrMatrix4.multiplyInto(viewMatrix, eyeFromHead, head)
             VrMatrix4.multiplyInto(mvpMatrix, projection, viewMatrix)

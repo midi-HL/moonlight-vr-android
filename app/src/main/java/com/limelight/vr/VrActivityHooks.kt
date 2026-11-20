@@ -40,11 +40,7 @@ class VrActivityHooks(
         // a hidden dialog and steal input. Swallow the whole gesture while VR is
         // on. P-E10 exception: a genuine short tap (no drag, no long press)
         // recentres the view, so the user need not take the headset off.
-        if (VrSession.enabled) {
-            VrSession.onVrTap(event)
-            return true
-        }
-        return delegate.dispatchTouchEvent(event)
+        return VrInputDispatcher.dispatchTouch(activity, event, inDialog, delegate::dispatchTouchEvent)
     }
 
     override fun dispatchTrackballEvent(event: MotionEvent): Boolean =

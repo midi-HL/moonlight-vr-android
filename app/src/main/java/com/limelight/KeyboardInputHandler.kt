@@ -161,23 +161,28 @@ class KeyboardInputHandler(private val game: Game) {
         game.conn?.sendKeyboardInput(translated, KeyboardPacket.KEY_UP, modifier, flags)
     }
 
-    fun handleKeyDown(event: KeyEvent): Boolean {
-        when (event.keyCode) {
+    private fun accessibilityOwnsWindowCopy(event: KeyEvent): Boolean {
+        val service = KeyboardAccessibilityService.instance
+        val systemKey = when (event.keyCode) {
             KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH,
             KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN,
-            KeyEvent.KEYCODE_VOLUME_MUTE, KeyEvent.KEYCODE_POWER -> {
-                // 系统导航键/音量键/电源键直接跳过去重逻辑
-            }
-            else -> {
-                val device = event.device
-                if (!game.isEventFromAccessibilityService &&
-                    KeyboardAccessibilityService.instance != null &&
-                    (device != null && !device.isVirtual)
-                ) {
-                    return true
-                }
-            }
+            KeyEvent.KEYCODE_VOLUME_MUTE, KeyEvent.KEYCODE_POWER -> true
+            else -> false
         }
+        // A connected service can be idle while focus changes or a native menu is open.
+        // Only the service actively forwarding to this Game owns its physical window copies.
+        return KeyboardAccessibilityInputPolicy.shouldSuppressWindowEvent(
+            fromAccessibility = game.isEventFromAccessibilityService,
+            physicalDevice = event.device?.isVirtual == false,
+            systemKey = systemKey,
+            serviceConnected = service != null,
+            intercepting = KeyboardAccessibilityService.interceptingEnabled,
+            callbackIsOwner = service?.keyEventCallback === game,
+        )
+    }
+
+    fun handleKeyDown(event: KeyEvent): Boolean {
+        if (accessibilityOwnsWindowCopy(event)) return true
 
         // 自定义组合键，只能其它+esc，esc+其它时，esc抬起时其它才会down
         val keyCode = event.keyCode
@@ -309,20 +314,7 @@ class KeyboardInputHandler(private val game: Game) {
     }
 
     fun handleKeyUp(event: KeyEvent): Boolean {
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH -> {
-                // 系统导航键直接跳过去重逻辑
-            }
-            else -> {
-                val device = event.device
-                if (!game.isEventFromAccessibilityService &&
-                    KeyboardAccessibilityService.instance != null &&
-                    (device != null && !device.isVirtual)
-                ) {
-                    return true
-                }
-            }
-        }
+        if (accessibilityOwnsWindowCopy(event)) return true
 
         if (isPhysicalKeyboardConnected()) {
             // ESC键双击逻辑

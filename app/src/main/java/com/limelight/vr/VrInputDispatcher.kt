@@ -22,7 +22,9 @@ object VrInputDispatcher {
     ): Boolean {
         val controllerKey = isControllerKey(event)
         // BACK from a controller can be the game's legacy SELECT button.
-        val backOwnedByHost = inDialog || (activity is Game && activity.connected && controllerKey)
+        val mouseBack = event.isFromSource(InputDevice.SOURCE_MOUSE) ||
+            event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+        val backOwnedByHost = inDialog || (activity is Game && activity.connected && (controllerKey || mouseBack))
         if (VrSession.onKeyEvent(event, controllerKey, backOwnedByHost,
                 captureUiMenuKeys = activity !is Game || inDialog)) return true
         if (!VrSession.enabled || !controllerKey || activity is Game) return deliver(event)
@@ -36,6 +38,27 @@ object VrInputDispatcher {
         val mapped = KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_DPAD_CENTER,
             event.repeatCount, event.metaState, event.deviceId, 0, event.flags, event.source)
         return deliver(mapped)
+    }
+
+    /** Hardware pointer presses use touch dispatch too; only touchscreen gestures recenter. */
+    fun dispatchTouch(activity: Activity, event: MotionEvent, inDialog: Boolean,
+                      deliver: (MotionEvent) -> Boolean): Boolean {
+        if (!VrSession.enabled) return deliver(event)
+        val tool = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
+        val hardwarePointer = event.isFromSource(InputDevice.SOURCE_MOUSE) ||
+            event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+            event.isFromSource(InputDevice.SOURCE_TOUCHPAD) ||
+            tool == MotionEvent.TOOL_TYPE_MOUSE || tool == MotionEvent.TOOL_TYPE_STYLUS ||
+            tool == MotionEvent.TOOL_TYPE_ERASER
+        if (hardwarePointer && activity is Game && activity.connected &&
+            !inDialog && !VrSession.panelOpen && !activity.hasNativeGameMenu()) {
+            // Send to the same production input handler as pointer hover/scroll. Letting this
+            // hit View dispatch would target the promoted Cardboard Surface, not streamView.
+            activity.onGenericMotionEvent(event)
+        } else if (!hardwarePointer && event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) {
+            VrSession.onVrTap(event)
+        }
+        return true
     }
 
     fun dispatchMotion(

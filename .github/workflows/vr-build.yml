@@ -126,7 +126,10 @@ jobs:
           if 'glClear(' in eye_body:
               sys.exit('FAIL: glClear() must NOT be called inside onDrawEye (P-B1)')
           hooks = (root / 'app/src/main/java/com/limelight/vr/VrActivityHooks.kt').read_text(encoding='utf-8')
-          if 'VrSession.onVrTap(event)' not in hooks or 'return true' not in hooks:
+          dispatcher = (root / 'app/src/main/java/com/limelight/vr/VrInputDispatcher.kt').read_text(encoding='utf-8')
+          if ('VrInputDispatcher.dispatchTouch(activity, event' not in hooks or
+                  'VrSession.onVrTap(event)' not in dispatcher or
+                  'activity.onGenericMotionEvent(event)' not in dispatcher or 'return true' not in dispatcher):
               sys.exit('FAIL: touch isolation + short-tap recentre missing (P-E1/E10)')
           session_tap = (root / 'app/src/main/java/com/limelight/vr/VrSession.kt').read_text(encoding='utf-8')
           if 'fun onVrTap(' not in session_tap or 'ACTION_CANCEL' not in session_tap:
@@ -152,7 +155,6 @@ jobs:
           if ('updateKeyboardInterception()' not in focus_changed or
                   'val intercepting = streamInForeground && hasWindowFocus() && !overlayVisible' not in game):
               sys.exit('FAIL: Keyboard accessibility capture must yield to focused dialogs and popups')
-          dispatcher = (root / 'app/src/main/java/com/limelight/vr/VrInputDispatcher.kt').read_text(encoding='utf-8')
           key_classification = dispatcher.split('internal fun isControllerKey(', 1)[1].split('fun dispatchKey(', 1)[0]
           if ('VrGamepadRouter.isControllerKeyCode(event.keyCode)' not in key_classification or
                   'VrSession.panelOpen' in key_classification or 'VrSession.enabled' in key_classification):

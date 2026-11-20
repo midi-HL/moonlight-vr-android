@@ -29,7 +29,12 @@ class KeyboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (interceptingEnabled && PreferenceConfiguration.readPreferences(this).enableCustomKeyMap) {
+        // A service can remain connected after Game has paused or detached its callback.
+        // Only consume a system-filtered event when this invocation has a forwarding target.
+        val callback = keyEventCallback
+        if (!interceptingEnabled || callback == null) return super.onKeyEvent(event)
+
+        if (PreferenceConfiguration.readPreferences(this).enableCustomKeyMap) {
             var fixedKeyCode = event.keyCode
             when (fixedKeyCode) {
                 KeyEvent.KEYCODE_HOME -> fixedKeyCode = KeyEvent.KEYCODE_ESCAPE
@@ -38,8 +43,7 @@ class KeyboardAccessibilityService : AccessibilityService() {
                 KeyEvent.KEYCODE_MEDIA_NEXT -> fixedKeyCode = KeyEvent.KEYCODE_F11
             }
             if (fixedKeyCode == KeyEvent.KEYCODE_SYSRQ || fixedKeyCode != event.keyCode) {
-                if (keyEventCallback != null) {
-                    val fixedEvent = KeyEvent(
+                val fixedEvent = KeyEvent(
                         event.downTime,
                         event.eventTime,
                         event.action,
@@ -51,17 +55,14 @@ class KeyboardAccessibilityService : AccessibilityService() {
                         event.flags,
                         event.source
                     )
-                    keyEventCallback!!.onKeyEvent(fixedEvent)
-                }
+                callback.onKeyEvent(fixedEvent)
                 return true
             }
         }
 
         // 小米平板将物理 ESC 键（ScanCode=1）映射为 Android 的 BACK 键（Code=4）。
         if (event.scanCode == 1) {
-            if (interceptingEnabled) {
-                if (keyEventCallback != null) {
-                    val fixedEvent = KeyEvent(
+            val fixedEvent = KeyEvent(
                         event.downTime,
                         event.eventTime,
                         event.action,
@@ -73,10 +74,8 @@ class KeyboardAccessibilityService : AccessibilityService() {
                         event.flags,
                         event.source
                     )
-                    keyEventCallback!!.onKeyEvent(fixedEvent)
-                }
-                return true
-            }
+            callback.onKeyEvent(fixedEvent)
+            return true
         }
 
         when (event.keyCode) {
@@ -89,12 +88,8 @@ class KeyboardAccessibilityService : AccessibilityService() {
             KeyEvent.KEYCODE_POWER -> return false
         }
 
-        if (interceptingEnabled) {
-            keyEventCallback?.onKeyEvent(event)
-            return true
-        }
-
-        return super.onKeyEvent(event)
+        callback.onKeyEvent(event)
+        return true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {

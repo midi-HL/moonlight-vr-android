@@ -576,31 +576,31 @@ open class NvConnection(
         }.start()
     }
 
-    fun sendMouseMove(deltaX: Short, deltaY: Short) {
+    open fun sendMouseMove(deltaX: Short, deltaY: Short) {
         if (!isMonkey) {
             MoonBridge.sendMouseMove(deltaX, deltaY)
         }
     }
 
-    fun sendMousePosition(x: Short, y: Short, referenceWidth: Short, referenceHeight: Short) {
+    open fun sendMousePosition(x: Short, y: Short, referenceWidth: Short, referenceHeight: Short) {
         if (!isMonkey) {
             MoonBridge.sendMousePosition(x, y, referenceWidth, referenceHeight)
         }
     }
 
-    fun sendMouseMoveAsMousePosition(deltaX: Short, deltaY: Short, referenceWidth: Short, referenceHeight: Short) {
+    open fun sendMouseMoveAsMousePosition(deltaX: Short, deltaY: Short, referenceWidth: Short, referenceHeight: Short) {
         if (!isMonkey) {
             MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, referenceWidth, referenceHeight)
         }
     }
 
-    fun sendMouseButtonDown(mouseButton: Byte) {
+    open fun sendMouseButtonDown(mouseButton: Byte) {
         if (!isMonkey) {
             MoonBridge.sendMouseButton(MouseButtonPacket.PRESS_EVENT, mouseButton)
         }
     }
 
-    fun sendMouseButtonUp(mouseButton: Byte) {
+    open fun sendMouseButtonUp(mouseButton: Byte) {
         if (!isMonkey) {
             MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton)
         }
@@ -621,7 +621,7 @@ open class NvConnection(
     }
 
     /** Used by ownership handoff: a dropped removal must abort USB export. */
-    fun sendControllerInputChecked(
+    open fun sendControllerInputChecked(
         controllerNumber: Short, activeGamepadMask: Short, buttonFlags: Int = 0,
         leftTrigger: Byte = 0, rightTrigger: Byte = 0,
         leftStickX: Short = 0, leftStickY: Short = 0,
@@ -631,7 +631,7 @@ open class NvConnection(
         leftStickX, leftStickY, rightStickX, rightStickY
     )
 
-    fun sendKeyboardInput(keyMap: Short, keyDirection: Byte, modifier: Byte, flags: Byte) {
+    open fun sendKeyboardInput(keyMap: Short, keyDirection: Byte, modifier: Byte, flags: Byte) {
         if (!isMonkey) {
             MoonBridge.sendKeyboardInput(keyMap, keyDirection, modifier, flags)
         }
