@@ -10,7 +10,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.limelight.Game
 import com.limelight.TouchInputHandler
-import com.limelight.binding.input.capture.InputCaptureProvider
 import com.limelight.nvstream.NvConnection
 import com.limelight.nvstream.StreamConfiguration
 import com.limelight.nvstream.http.ComputerDetails
@@ -36,7 +35,6 @@ class VrMouseInputRuntimeTest {
                 .apply { isAccessible = true }
                 .invoke(game, context)
             game.prefConfig = PreferenceConfiguration().apply { enableNativeMousePointer = true }
-            game.inputCaptureProvider = InputCaptureProvider()
             game.grabbedInput = true
             val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
             game.streamView = stream
