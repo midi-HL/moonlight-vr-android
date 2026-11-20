@@ -113,6 +113,8 @@ class VrMouseInputRuntimeTest {
         },
         null,
         display,
+        null,
+        false,
     ) {
         val packets = mutableListOf<String>()
 
