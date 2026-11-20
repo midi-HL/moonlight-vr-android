@@ -47,7 +47,7 @@ class VrMouseInputRuntimeTest {
                 val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
                 game.streamView = stream
                 val connection = RecordingConnection(
-                    activity.applicationContext, activity.windowManager.defaultDisplay,
+                    activity.applicationContext, requireNotNull(activity.window.decorView.display),
                 )
                 Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
                     .apply { isAccessible = true }
