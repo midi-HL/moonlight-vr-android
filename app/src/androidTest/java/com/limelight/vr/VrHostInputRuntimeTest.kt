@@ -157,10 +157,12 @@ class VrHostInputRuntimeTest {
     @Test fun androidGamepadButtonsAndAxesReachHostWhileVrPanelIsClosed() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val device = InputDevice.getDeviceIds().mapNotNull { InputDevice.getDevice(it) }
+        val device = InputDevice.getDeviceIds().asSequence().mapNotNull { InputDevice.getDevice(it) }
             .firstOrNull { !it.isVirtual &&
                 it.supportsSource(InputDevice.SOURCE_GAMEPAD) &&
-                it.supportsSource(InputDevice.SOURCE_JOYSTICK) }
+                it.supportsSource(InputDevice.SOURCE_JOYSTICK) &&
+                it.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null &&
+                it.getMotionRange(MotionEvent.AXIS_Y, InputDevice.SOURCE_JOYSTICK) != null }
         assumeTrue("A gamepad with joystick axes must be attached", device != null)
         val pad = requireNotNull(device)
         val originalSettings = VrSession.settings
@@ -219,9 +221,15 @@ class VrHostInputRuntimeTest {
                 assertEquals(0, presses.last().buttons and ControllerPacket.A_FLAG)
                 assertTrue(presses.all { it.mask.toInt() and (1 shl it.number.toInt()) != 0 })
 
+                val centers = activity.getSharedPreferences("stick_centers", Context.MODE_PRIVATE)
+                val centerX = centers.getFloat("${pad.descriptor}:${MotionEvent.AXIS_X}", 0f)
+                val centerY = centers.getFloat("${pad.descriptor}:${MotionEvent.AXIS_Y}", 0f)
                 fun axis(x: Float) {
                     val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0 })
-                    val coords = arrayOf(MotionEvent.PointerCoords().apply { setAxisValue(MotionEvent.AXIS_X, x) })
+                    val coords = arrayOf(MotionEvent.PointerCoords().apply {
+                        setAxisValue(MotionEvent.AXIS_X, x)
+                        setAxisValue(MotionEvent.AXIS_Y, centerY)
+                    })
                     val event = MotionEvent.obtain(time, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE,
                         1, props, coords, 0, 0, 1f, 1f, pad.id, 0, InputDevice.SOURCE_JOYSTICK, 0)
                     try {
@@ -230,10 +238,10 @@ class VrHostInputRuntimeTest {
                         assertTrue(game.onGenericMotionEvent(event))
                     } finally { event.recycle() }
                 }
-                axis(0.75f)
+                axis(centerX + 0.75f * (1f - centerX))
                 assertTrue("Stick deflection must reach the host packet API",
                     connection.controllerPackets.last().leftX.toInt() > 10000)
-                axis(0f)
+                axis(centerX)
                 assertEquals(0, connection.controllerPackets.last().leftX.toInt())
                 val beforePanel = connection.controllerPackets.size
                 VrSession.setPanelOpen(true)
