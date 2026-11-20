@@ -206,7 +206,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         refreshHosts()
     }
 
-    private val backPresses = HashMap<Int, Long>()
+    private val backOwnership = VrBackKeyOwnership()
 
     /** Returns true when the event was consumed by the VR layer. */
     fun onKeyEvent(
@@ -215,21 +215,14 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         backOwnedByHost: Boolean,
         captureUiMenuKeys: Boolean = false,
     ): Boolean {
-        // A focused Android dialog or controller in Game owns BACK until the VR panel is opened.
-        if (event.keyCode == VrKeys.BACK && (!backOwnedByHost || panelOpen || event.deviceId in backPresses)) {
-            when (event.action) {
-                VrKeys.ACTION_DOWN -> if (enabled) {
-                    if (event.repeatCount == 0) backPresses[event.deviceId] = event.downTime
-                    return true
-                }
-                VrKeys.ACTION_UP -> {
-                    val downTime = backPresses.remove(event.deviceId)
-                    if (downTime != null) {
-                        if (downTime == event.downTime && !event.isCanceled) onBackInvoked()
-                        return true
-                    }
-                    if (enabled) return true
-                }
+        // A mouse/controller press already sent to Game must retain its matching release
+        // even if a different device opens the VR panel while that press is held.
+        if (event.keyCode == VrKeys.BACK) {
+            return when (backOwnership.onKey(event.action, event.deviceId, event.downTime,
+                    event.repeatCount > 0, event.isCanceled, enabled, backOwnedByHost, panelOpen)) {
+                VrBackKeyOwnership.Result.PassThrough -> false
+                VrBackKeyOwnership.Result.Consumed -> true
+                VrBackKeyOwnership.Result.InvokeBack -> { onBackInvoked(); true }
             }
         }
         return handle(router.onKey(event.keyCode, event.action, isControllerKey,
@@ -554,7 +547,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     private fun cancelPendingInput() {
         cancelHold()
-        backPresses.clear()
+        backOwnership.clear()
         router.reset()
         tapCancelled = true
     }
