@@ -2,13 +2,17 @@ package com.limelight.vr
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
+import android.view.Display
 import android.view.InputDevice
 import android.view.MotionEvent
-import android.view.WindowManager
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.limelight.Game
+import com.limelight.HelpActivity
 import com.limelight.TouchInputHandler
 import com.limelight.nvstream.NvConnection
 import com.limelight.nvstream.StreamConfiguration
@@ -29,41 +33,50 @@ class VrMouseInputRuntimeTest {
     @Test fun nativeMouseDownAndUpProduceBalancedHostPackets() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        instrumentation.runOnMainSync {
-            val game = Game()
-            ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
-                .apply { isAccessible = true }
-                .invoke(game, context)
-            game.prefConfig = PreferenceConfiguration().apply { enableNativeMousePointer = true }
-            game.grabbedInput = true
-            val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
-            game.streamView = stream
-            val connection = RecordingConnection(game)
-            Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
-                .apply { isAccessible = true }
-                .set(game, connection)
+        val scenario = ActivityScenario.launch<HelpActivity>(
+            Intent(context, HelpActivity::class.java).setData(Uri.parse("about:blank")),
+        )
+        try {
+            scenario.onActivity { activity ->
+                val game = Game()
+                ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
+                    .apply { isAccessible = true }
+                    .invoke(game, activity)
+                game.prefConfig = PreferenceConfiguration().apply { enableNativeMousePointer = true }
+                game.grabbedInput = true
+                val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
+                game.streamView = stream
+                val connection = RecordingConnection(
+                    activity.applicationContext, activity.windowManager.defaultDisplay,
+                )
+                Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
+                    .apply { isAccessible = true }
+                    .set(game, connection)
 
-            val handler = TouchInputHandler(game)
-            val downTime = SystemClock.uptimeMillis()
-            val down = mouseEvent(downTime, MotionEvent.ACTION_DOWN, MotionEvent.BUTTON_PRIMARY)
-            val up = mouseEvent(downTime, MotionEvent.ACTION_UP, 0)
-            try {
-                assertEquals(true, handler.handleMotionEvent(stream, down))
-                assertEquals(true, handler.handleMotionEvent(stream, up))
-            } finally {
-                down.recycle()
-                up.recycle()
+                val handler = TouchInputHandler(game)
+                val downTime = SystemClock.uptimeMillis()
+                val down = mouseEvent(downTime, MotionEvent.ACTION_DOWN, MotionEvent.BUTTON_PRIMARY)
+                val up = mouseEvent(downTime, MotionEvent.ACTION_UP, 0)
+                try {
+                    assertEquals(true, handler.handleMotionEvent(stream, down))
+                    assertEquals(true, handler.handleMotionEvent(stream, up))
+                } finally {
+                    down.recycle()
+                    up.recycle()
+                }
+
+                assertEquals(
+                    listOf(
+                        "position:240,180,1000,600",
+                        "down:${MouseButtonPacket.BUTTON_LEFT}",
+                        "position:240,180,1000,600",
+                        "up:${MouseButtonPacket.BUTTON_LEFT}",
+                    ),
+                    connection.packets,
+                )
             }
-
-            assertEquals(
-                listOf(
-                    "position:240,180,1000,600",
-                    "down:${MouseButtonPacket.BUTTON_LEFT}",
-                    "position:240,180,1000,600",
-                    "up:${MouseButtonPacket.BUTTON_LEFT}",
-                ),
-                connection.packets,
-            )
+        } finally {
+            scenario.close()
         }
     }
 
@@ -84,8 +97,8 @@ class VrMouseInputRuntimeTest {
         )
     }
 
-    private class RecordingConnection(game: Game) : NvConnection(
-        game.applicationContext,
+    private class RecordingConnection(context: Context, display: Display) : NvConnection(
+        context,
         ComputerDetails.AddressTuple("127.0.0.1", 47989),
         47984,
         "vr-mouse-input-test",
@@ -98,7 +111,7 @@ class VrMouseInputRuntimeTest {
             override fun encodeBase64String(data: ByteArray): String = error("unused in input test")
         },
         null,
-        (game.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay,
+        display,
     ) {
         val packets = mutableListOf<String>()
 
