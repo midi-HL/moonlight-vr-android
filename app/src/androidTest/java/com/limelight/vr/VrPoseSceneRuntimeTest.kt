@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.opengl.GLES20
 import android.opengl.Matrix
 import android.os.SystemClock
 import android.view.SurfaceView
@@ -140,6 +141,11 @@ class VrPoseSceneRuntimeTest {
     }
 
     private data class Pose(val tag: Int, val view: FloatArray, val recenter: Boolean)
+    private data class TagArea(
+        val viewportX: Int, val viewportY: Int, val viewportWidth: Int, val viewportHeight: Int,
+        val surfaceWidth: Int, val surfaceHeight: Int, val left: Int, val bottom: Int, val cell: Int,
+    )
+    private data class VisibleTag(val tag: Int?, val details: String)
 
     private class PoseScene(context: Context, source: View) : CardboardView(context) {
         private val capture = VrWindowCapture(source, VrPanelView(context), false)
@@ -148,14 +154,21 @@ class VrPoseSceneRuntimeTest {
         private val pose = AtomicReference(Pose(0, rotation(0f, 1f, 0f, 0f), true))
         val completedTag = AtomicInteger(-1)
         val completedTagFrames = AtomicInteger()
+        val tagArea = AtomicReference<TagArea?>()
         private var centeredTag = -1
         private var drawingTag = -1
         private var resumed = false
+        private var surfaceWidth = 0
+        private var surfaceHeight = 0
+        private var outputSurface: SurfaceView? = null
 
         init {
             for (i in 0 until childCount) {
                 val child = getChildAt(i)
-                if (child is SurfaceView) child.setZOrderOnTop(true) else child.visibility = View.GONE
+                if (child is SurfaceView) {
+                    outputSurface = child
+                    child.setZOrderOnTop(true)
+                } else child.visibility = View.GONE
             }
             setRenderer(object : CardboardView.Renderer {
                 private val synthetic = HeadTransform()
@@ -172,10 +185,15 @@ class VrPoseSceneRuntimeTest {
                 override fun onDrawEye(eye: CardboardView.Eye) = renderer.onDrawEye(eye)
                 override fun onFinishFrame(viewport: Viewport) {
                     renderer.onFinishFrame(viewport)
+                    drawVisibleTag(viewport)
                     if (completedTag.getAndSet(drawingTag) == drawingTag) completedTagFrames.incrementAndGet()
                     else completedTagFrames.set(1)
                 }
-                override fun onSurfaceChanged(width: Int, height: Int) = renderer.onSurfaceChanged(width, height)
+                override fun onSurfaceChanged(width: Int, height: Int) {
+                    surfaceWidth = width
+                    surfaceHeight = height
+                    renderer.onSurfaceChanged(width, height)
+                }
                 override fun onSurfaceCreated(config: EGLConfig) = renderer.onSurfaceCreated(config)
                 override fun onRendererShutdown() = renderer.onRendererShutdown()
             })
@@ -194,8 +212,53 @@ class VrPoseSceneRuntimeTest {
 
         fun setPhysicalPose(physical: FloatArray, recenter: Boolean): Int {
             val tag = nextTag.incrementAndGet()
+            check(tag in 1..255) { "Visible pose tags must not wrap: $tag" }
             pose.set(Pose(tag, inverse(physical), recenter))
             return tag
+        }
+
+        /** Called on GL after production composition; these pixels identify the swapped frame. */
+        private fun drawVisibleTag(viewport: Viewport) {
+            val cell = minOf(12, viewport.width / 12, viewport.height / 3)
+            if (cell < 2 || surfaceWidth <= 0 || surfaceHeight <= 0 || drawingTag !in 0..255) {
+                tagArea.set(null)
+                return
+            }
+            val area = TagArea(viewport.x, viewport.y, viewport.width, viewport.height,
+                surfaceWidth, surfaceHeight, viewport.x + cell, viewport.y + cell, cell)
+            val scissorEnabled = GLES20.glIsEnabled(GLES20.GL_SCISSOR_TEST)
+            val scissor = IntArray(4)
+            val clearColor = FloatArray(4)
+            val colorMask = BooleanArray(4)
+            GLES20.glGetIntegerv(GLES20.GL_SCISSOR_BOX, scissor, 0)
+            GLES20.glGetFloatv(GLES20.GL_COLOR_CLEAR_VALUE, clearColor, 0)
+            GLES20.glGetBooleanv(GLES20.GL_COLOR_WRITEMASK, colorMask, 0)
+            try {
+                GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+                GLES20.glColorMask(true, true, true, true)
+                for (index in 0 until 10) {
+                    // Two white sentinels, then the tag's eight bits, least significant first.
+                    // Neither black nor white matches the four colored scene classifiers.
+                    val value = if (index < 2 || drawingTag and (1 shl (index - 2)) != 0) 1f else 0f
+                    GLES20.glScissor(area.left + index * cell, area.bottom, cell, cell)
+                    GLES20.glClearColor(value, value, value, 1f)
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                }
+            } finally {
+                GLES20.glScissor(scissor[0], scissor[1], scissor[2], scissor[3])
+                GLES20.glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3])
+                GLES20.glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3])
+                if (!scissorEnabled) GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+            }
+            tagArea.set(area)
+        }
+
+        /** Read on main: SurfaceView placement can differ from its GL buffer's dimensions. */
+        fun outputBounds(): IntArray? {
+            val surface = outputSurface ?: return null
+            val position = IntArray(2)
+            surface.getLocationOnScreen(position)
+            return intArrayOf(position[0], position[1], surface.width, surface.height)
         }
 
         fun release() {
@@ -249,22 +312,29 @@ class VrPoseSceneRuntimeTest {
         val deadline = SystemClock.uptimeMillis() + 20000L
         var last: Bitmap? = null
         var stats: Stereo? = null
+        var visible = VisibleTag(null, "No screenshot captured")
+        val observedTags = linkedSetOf<Int>()
         try {
             do {
-                // Wait for a second finished frame of this pose so a screenshot of the compositor
-                // cannot reuse the previous pose before the first tagged GL swap completes.
-                if (scene.completedTag.get() >= tag && scene.completedTagFrames.get() >= 2) {
+                // GL completion alone does not establish which frame SurfaceFlinger captured.
+                // Inspect scene geometry only after the screenshot itself carries this pose's tag.
+                if (scene.completedTag.get() == tag && scene.completedTagFrames.get() >= 2) {
                     instrumentation.uiAutomation.takeScreenshot()?.let { captured ->
                         last?.recycle()
                         last = captured.copy(Bitmap.Config.ARGB_8888, false)
                         captured.recycle()
-                        stats = last?.let(::inspect)
+                        val bitmap = requireNotNull(last)
+                        visible = readVisibleTag(scene, bitmap)
+                        visible.tag?.let { observedTags.add(it) }
+                        stats = if (visible.tag == tag) inspect(bitmap) else null
                     }
-                    if (stats?.let(matches) == true) return requireNotNull(stats)
+                    if (visible.tag == tag && stats?.let(matches) == true) return requireNotNull(stats)
                 }
                 SystemClock.sleep(100L)
             } while (SystemClock.uptimeMillis() < deadline)
-            throw AssertionError("$name did not show expected synthetic pitch in both eyes: $stats")
+            throw AssertionError("$name did not show expected synthetic pitch in both eyes: " +
+                "expectedTag=$tag observedTags=$observedTags lastVisible=$visible " +
+                "completedTag=${scene.completedTag.get()} completedFrames=${scene.completedTagFrames.get()} stats=$stats")
         } finally {
             last?.let { captured ->
                 try {
@@ -275,6 +345,38 @@ class VrPoseSceneRuntimeTest {
                 } finally { captured.recycle() }
             }
         }
+    }
+
+    private fun readVisibleTag(scene: PoseScene, bitmap: Bitmap): VisibleTag {
+        val area = scene.tagArea.get() ?: return VisibleTag(null, "No final viewport tag area")
+        var bounds: IntArray? = null
+        instrumentation.runOnMainSync { bounds = scene.outputBounds() }
+        val screen = bounds ?: return VisibleTag(null, "No output SurfaceView bounds")
+        if (screen[2] <= 0 || screen[3] <= 0) return VisibleTag(null, "Empty SurfaceView bounds")
+        val bits = IntArray(10)
+        for (index in bits.indices) {
+            val glX = area.left + index * area.cell + area.cell / 2
+            val glY = area.bottom + area.cell / 2
+            val x = screen[0] + ((glX + 0.5) * screen[2] / area.surfaceWidth).toInt()
+            // GL starts at bottom left; UiAutomation's bitmap starts at top left.
+            val y = screen[1] + ((area.surfaceHeight - glY - 0.5) * screen[3] / area.surfaceHeight).toInt()
+            if (x !in 0 until bitmap.width || y !in 0 until bitmap.height) {
+                return VisibleTag(null, "Tag sample outside screenshot: ($x,$y), area=$area " +
+                    "surfaceBounds=${screen.contentToString()} bitmap=${bitmap.width}x${bitmap.height}")
+            }
+            val pixel = bitmap.getPixel(x, y)
+            val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
+            bits[index] = when {
+                r >= 200 && g >= 200 && b >= 200 -> 1
+                r <= 55 && g <= 55 && b <= 55 -> 0
+                else -> -1
+            }
+        }
+        val details = "bits=${bits.contentToString()} area=$area surfaceBounds=${screen.contentToString()}"
+        if (bits[0] != 1 || bits[1] != 1 || bits.any { it < 0 }) return VisibleTag(null, details)
+        var tag = 0
+        for (bit in 0 until 8) tag = tag or (bits[bit + 2] shl bit)
+        return VisibleTag(tag, details)
     }
 
     private fun directory() = File(context.getExternalFilesDir(null), "vr-review").apply { mkdirs() }
