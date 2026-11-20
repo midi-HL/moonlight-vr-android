@@ -1,5 +1,6 @@
 package com.limelight.vr
 
+import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -135,6 +136,95 @@ class VrHostInputRuntimeTest {
         } finally {
             scenario.close()
         }
+    }
+
+    @Test fun hostMouseBackReleaseSurvivesOpeningTheVrPanel() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val original = VrSession.settings
+        val scenario = ActivityScenario.launch<HelpActivity>(
+            Intent(context, HelpActivity::class.java).setData(Uri.parse("about:blank")))
+        try {
+            scenario.onActivity { activity ->
+                val (handler, connection) = keyboardPacketFixture(activity)
+                VrSession.setEnabled(activity, true)
+                assertTrue(VrSession.enabled)
+                for (source in intArrayOf(InputDevice.SOURCE_MOUSE, InputDevice.SOURCE_MOUSE_RELATIVE)) {
+                    VrSession.setPanelOpen(false)
+                    connection.packets.clear()
+                    val downTime = SystemClock.uptimeMillis()
+                    fun dispatch(action: Int) {
+                        val event = KeyEvent(downTime, SystemClock.uptimeMillis(), action,
+                            KeyEvent.KEYCODE_BACK, 0, 0, 31415, 0, 0, source)
+                        // The connected Game supplies backOwnedByHost=true for these mouse
+                        // sources. Exercise its production ownership and packet handlers without
+                        // pretending that this detached Game fixture has a live network session.
+                        if (!VrSession.onKeyEvent(event, false, backOwnedByHost = true)) {
+                            assertTrue(if (action == KeyEvent.ACTION_DOWN) handler.handleKeyDown(event)
+                                else handler.handleKeyUp(event))
+                        }
+                    }
+                    dispatch(KeyEvent.ACTION_DOWN)
+                    assertEquals(listOf("down:${MouseButtonPacket.BUTTON_RIGHT}"), connection.packets)
+                    VrSession.setPanelOpen(true)
+                    dispatch(KeyEvent.ACTION_UP)
+                    assertEquals("Opening the panel must preserve the host-owned mouse release",
+                        listOf("down:${MouseButtonPacket.BUTTON_RIGHT}",
+                            "up:${MouseButtonPacket.BUTTON_RIGHT}"), connection.packets)
+                    assertTrue("A host-owned release must not dismiss the VR panel", VrSession.panelOpen)
+                }
+            }
+        } finally {
+            try { scenario.onActivity { VrSession.updateSettings(it, original) } }
+            finally { scenario.close() }
+        }
+    }
+
+    @Test fun panelOwnedMouseBackClosesThePanelWithoutHostPackets() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val original = VrSession.settings
+        val scenario = ActivityScenario.launch<HelpActivity>(
+            Intent(context, HelpActivity::class.java).setData(Uri.parse("about:blank")))
+        try {
+            scenario.onActivity { activity ->
+                val (handler, connection) = keyboardPacketFixture(activity)
+                VrSession.setEnabled(activity, true)
+                assertTrue(VrSession.enabled)
+                VrSession.setPanelOpen(true)
+                val downTime = SystemClock.uptimeMillis()
+                for (action in intArrayOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                    val event = KeyEvent(downTime, SystemClock.uptimeMillis(), action,
+                        KeyEvent.KEYCODE_BACK, 0, 0, 31416, 0, 0, InputDevice.SOURCE_MOUSE)
+                    if (!VrSession.onKeyEvent(event, false, backOwnedByHost = true)) {
+                        if (action == KeyEvent.ACTION_DOWN) handler.handleKeyDown(event)
+                        else handler.handleKeyUp(event)
+                    }
+                }
+                assertFalse("A fresh BACK in the panel must close it", VrSession.panelOpen)
+                assertTrue("Closing the panel must keep VR enabled", VrSession.enabled)
+                assertTrue("Panel-owned BACK must not click the host", connection.packets.isEmpty())
+            }
+        } finally {
+            try { scenario.onActivity { VrSession.updateSettings(it, original) } }
+            finally { scenario.close() }
+        }
+    }
+
+    private fun keyboardPacketFixture(activity: Activity): Pair<KeyboardInputHandler, RecordingConnection> {
+        val game = Game()
+        ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
+            .apply { isAccessible = true }.invoke(game, activity)
+        game.prefConfig = PreferenceConfiguration() // mouseNavButtons defaults to false.
+        game.grabbedInput = true
+        game.touchInputHandler = TouchInputHandler(game)
+        val display = requireNotNull(activity.getSystemService(DisplayManager::class.java))
+            .getDisplay(Display.DEFAULT_DISPLAY)!!
+        val connection = RecordingConnection(activity.applicationContext, display)
+        Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
+            .apply { isAccessible = true }.set(game, connection)
+        val handler = KeyboardInputHandler(game).apply { keyboardTranslator = KeyboardTranslator() }
+        return handler to connection
     }
 
     private fun mouseEvent(downTime: Long, action: Int, buttons: Int): MotionEvent {
