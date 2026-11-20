@@ -144,6 +144,29 @@
     public int getPairingItemsFailed();
 }
 
+# Input packet regression invokes the production controller handler across APKs.
+-keep class com.limelight.binding.input.ControllerHandler {
+    public <init>(android.app.Activity, com.limelight.nvstream.NvConnection, com.limelight.ui.GameGestures, com.limelight.preferences.PreferenceConfiguration, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0);
+    public boolean handleButtonDown(android.view.KeyEvent);
+    public boolean handleButtonUp(android.view.KeyEvent);
+    public boolean handleMotionEvent(android.view.MotionEvent);
+    public void destroy();
+}
+-keepclassmembers class com.limelight.nvstream.NvConnection {
+    public <init>(...);
+    public int sendControllerArrivalEvent(...);
+    public int sendControllerBatteryEvent(...);
+    public int sendControllerInputChecked(...);
+}
+-keep class com.limelight.computers.DynamicTimeoutManager {
+    public <init>(com.limelight.computers.NetworkDiagnostics);
+    public void recordFailure(java.lang.String);
+    public void recordSuccess(java.lang.String, long);
+    public boolean isAddressHealthy(java.lang.String);
+    public long getProbeCooldownRemainingMs(java.lang.String, boolean);
+    public java.lang.String getStatisticsDebugInfo();
+}
+
 # VR orientation instrumentation calls this precise ABI across the target/test APK boundary.
 # Production callers alone do not keep a getter that only the instrumentation APK reads.
 -keep class com.limelight.OrientationManager {

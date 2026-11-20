@@ -716,7 +716,7 @@ open class NvConnection(
         }
     }
 
-    fun sendControllerArrivalEvent(
+    open fun sendControllerArrivalEvent(
         controllerNumber: Byte, activeGamepadMask: Short, type: Byte,
         supportedButtonFlags: Int, capabilities: Short
     ): Int {
@@ -753,7 +753,7 @@ open class NvConnection(
         if (!isMonkey) MoonBridge.stopControllerMotionEvent(controller)
         else MoonBridge.LI_ERR_UNSUPPORTED
 
-    fun sendControllerBatteryEvent(controllerNumber: Byte, batteryState: Byte, batteryPercentage: Byte): Int =
+    open fun sendControllerBatteryEvent(controllerNumber: Byte, batteryState: Byte, batteryPercentage: Byte): Int =
         MoonBridge.sendControllerBatteryEvent(controllerNumber, batteryState, batteryPercentage)
 
     fun sendUtf8Text(text: String) {

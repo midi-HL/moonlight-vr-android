@@ -25,13 +25,6 @@ class DynamicTimeoutManager(private val networkDiagnostics: NetworkDiagnostics) 
 
     private val addressStats = ConcurrentHashMap<String, ConnectionStats>()
 
-    /** Avoid Map default-method bridges so failure tracking works on minSdk runtimes too. */
-    private fun statsFor(address: String): ConnectionStats {
-        addressStats[address]?.let { return it }
-        val created = ConnectionStats()
-        return addressStats.putIfAbsent(address, created) ?: created
-    }
-
     @Volatile
     private var isNetworkUnstable = false
     @Volatile
@@ -179,7 +172,7 @@ class DynamicTimeoutManager(private val networkDiagnostics: NetworkDiagnostics) 
      * 记录连接成功
      */
     fun recordSuccess(address: String, responseTimeMs: Long) {
-        val stats = statsFor(address)
+        val stats = addressStats.computeIfAbsent(address) { ConnectionStats() }
         stats.recordSuccess(responseTimeMs)
 
         isNetworkUnstable = false
@@ -192,7 +185,7 @@ class DynamicTimeoutManager(private val networkDiagnostics: NetworkDiagnostics) 
      * 记录连接失败
      */
     fun recordFailure(address: String) {
-        val stats = statsFor(address)
+        val stats = addressStats.computeIfAbsent(address) { ConnectionStats() }
         stats.recordFailure()
 
         if (stats.consecutiveFailures >= 3) {

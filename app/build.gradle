@@ -249,6 +249,17 @@ android {
     }
 }
 
+// Instrumentation and target APKs share a process. Independent L8 shrinking can
+// otherwise leave a test-owned j$ class without methods the target APK calls. Keep
+// the same complete compatibility ABI in review builds; release packaging is unchanged.
+if (vrReviewBuild) {
+    tasks.configureEach { task ->
+        if (task.name in ["l8DexDesugarLibNonRootDebug", "l8DexDesugarLibNonRootDebugAndroidTest"]) {
+            task.keepRulesConfigurations.add('-keep class j$.** { *; }')
+        }
+    }
+}
+
 dependencies {
     implementation project(':pyrowave-runtime')
     implementation project(':usbip-backend')
