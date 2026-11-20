@@ -3,6 +3,7 @@ package com.limelight.vr
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.SystemClock
 import android.view.Display
@@ -46,9 +47,9 @@ class VrMouseInputRuntimeTest {
                 game.grabbedInput = true
                 val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
                 game.streamView = stream
-                val connection = RecordingConnection(
-                    activity.applicationContext, requireNotNull(activity.window.decorView.display),
-                )
+                val displays = requireNotNull(context.getSystemService(DisplayManager::class.java))
+                val display = requireNotNull(displays.getDisplay(Display.DEFAULT_DISPLAY))
+                val connection = RecordingConnection(activity.applicationContext, display)
                 Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
                     .apply { isAccessible = true }
                     .set(game, connection)
