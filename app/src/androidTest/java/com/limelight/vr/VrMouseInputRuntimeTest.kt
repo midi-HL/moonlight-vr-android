@@ -39,7 +39,9 @@ class VrMouseInputRuntimeTest {
             val stream = StreamView(game).apply { layout(0, 0, 1000, 600) }
             game.streamView = stream
             val connection = RecordingConnection(game)
-            Game::class.java.getDeclaredField("conn").apply { isAccessible = true }.set(game, connection)
+            Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
+                .apply { isAccessible = true }
+                .set(game, connection)
 
             val handler = TouchInputHandler(game)
             val downTime = SystemClock.uptimeMillis()
