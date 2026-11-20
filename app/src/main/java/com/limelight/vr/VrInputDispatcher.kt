@@ -1,5 +1,6 @@
 package com.limelight.vr
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.SystemClock
 import android.view.InputDevice
@@ -8,6 +9,7 @@ import android.view.MotionEvent
 import com.limelight.Game
 
 /** Routes input through the next Android Window.Callback without redispatching into its decor. */
+@SuppressLint("InlinedApi")
 object VrInputDispatcher {
     internal fun isControllerKey(event: KeyEvent): Boolean =
         VrGamepadRouter.isGamepad(event.source) ||
