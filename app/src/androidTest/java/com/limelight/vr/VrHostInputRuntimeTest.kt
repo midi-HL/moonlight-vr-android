@@ -175,7 +175,10 @@ class VrHostInputRuntimeTest {
                 }
             }
         } finally {
-            try { scenario.onActivity { VrSession.updateSettings(it, original) } }
+            try { scenario.onActivity {
+                VrSession.setPanelOpen(false)
+                VrSession.updateSettings(it, original)
+            } }
             finally { scenario.close() }
         }
     }
@@ -206,7 +209,10 @@ class VrHostInputRuntimeTest {
                 assertTrue("Panel-owned BACK must not click the host", connection.packets.isEmpty())
             }
         } finally {
-            try { scenario.onActivity { VrSession.updateSettings(it, original) } }
+            try { scenario.onActivity {
+                VrSession.setPanelOpen(false)
+                VrSession.updateSettings(it, original)
+            } }
             finally { scenario.close() }
         }
     }

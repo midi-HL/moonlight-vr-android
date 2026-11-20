@@ -143,4 +143,19 @@ class VrBackKeyOwnershipTest {
         assertEquals(VrBackKeyOwnership.Result.PassThrough, f.key(action = 2))
         assertEquals(VrBackKeyOwnership.Result.InvokeBack, f.key(VrKeys.ACTION_UP))
     }
+
+    @Test fun orphanRepeatCannotTurnItsReleaseIntoAVrBackAction() {
+        val f = Fixture().apply { panel = true }
+        assertEquals(VrBackKeyOwnership.Result.Consumed,
+            f.key(VrKeys.ACTION_DOWN, repeat = true))
+        assertEquals(VrBackKeyOwnership.Result.Consumed, f.key(VrKeys.ACTION_UP))
+    }
+
+    @Test fun forwardedOrphanRepeatStillGetsItsReleaseAfterPanelOpens() {
+        val f = Fixture().apply { host = true }
+        assertEquals(VrBackKeyOwnership.Result.PassThrough,
+            f.key(VrKeys.ACTION_DOWN, repeat = true))
+        f.panel = true
+        assertEquals(VrBackKeyOwnership.Result.PassThrough, f.key(VrKeys.ACTION_UP))
+    }
 }

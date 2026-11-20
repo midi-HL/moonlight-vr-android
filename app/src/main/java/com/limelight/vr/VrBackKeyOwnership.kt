@@ -4,7 +4,7 @@ package com.limelight.vr
 internal class VrBackKeyOwnership {
     enum class Result { PassThrough, Consumed, InvokeBack }
 
-    private data class Press(val downTime: Long, val captured: Boolean)
+    private data class Press(val downTime: Long, val captured: Boolean, val initialDownSeen: Boolean)
 
     private val presses = HashMap<Int, Press>()
 
@@ -22,7 +22,7 @@ internal class VrBackKeyOwnership {
             // Repeats and duplicate deliveries of the same DOWN retain its owner. A new
             // physical press replaces stale state if the previous UP was lost elsewhere.
             val press = presses[deviceId]?.takeIf { isRepeat || it.downTime == downTime }
-                ?: Press(downTime, vrEnabled && (!backOwnedByHost || panelOpen)).also {
+                ?: Press(downTime, vrEnabled && (!backOwnedByHost || panelOpen), !isRepeat).also {
                     presses[deviceId] = it
                 }
             if (press.captured) Result.Consumed else Result.PassThrough
@@ -34,7 +34,7 @@ internal class VrBackKeyOwnership {
                     Result.Consumed
                 } else Result.PassThrough
                 !press.captured -> Result.PassThrough
-                vrEnabled && !isCanceled && press.downTime == downTime -> Result.InvokeBack
+                vrEnabled && press.initialDownSeen && !isCanceled && press.downTime == downTime -> Result.InvokeBack
                 else -> Result.Consumed
             }
         }
