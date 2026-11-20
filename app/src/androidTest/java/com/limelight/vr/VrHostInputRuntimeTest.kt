@@ -37,7 +37,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Exercises production mouse and keyboard handlers through their host packet seams. */
+/** Exercises production pointer, keyboard and controller handlers through their host packet seams. */
 @RunWith(AndroidJUnit4::class)
 class VrHostInputRuntimeTest {
     @Test fun nativeMouseDownAndUpProduceBalancedHostPackets() {
@@ -157,20 +157,34 @@ class VrHostInputRuntimeTest {
     @Test fun androidGamepadButtonsAndAxesReachHostWhileVrPanelIsClosed() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val device = InputDevice.getDeviceIds().asSequence().mapNotNull { InputDevice.getDevice(it) }
-            .firstOrNull { !it.isVirtual &&
-                it.supportsSource(InputDevice.SOURCE_GAMEPAD) &&
-                it.supportsSource(InputDevice.SOURCE_JOYSTICK) &&
-                it.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null &&
-                it.getMotionRange(MotionEvent.AXIS_Y, InputDevice.SOURCE_JOYSTICK) != null }
-        assumeTrue("A gamepad with joystick axes must be attached", device != null)
-        val pad = requireNotNull(device)
         val originalSettings = VrSession.settings
         val scenario = ActivityScenario.launch<HelpActivity>(
             Intent(context, HelpActivity::class.java).setData(Uri.parse("about:blank")),
         )
         var handler: ControllerHandler? = null
         try {
+            // MuMu can expose only source-class bits to a background app while preserving its
+            // motion ranges. Enumerate after the real Activity resumes, and allow device-change
+            // notifications to settle instead of depending on a previous test's foreground window.
+            var device: InputDevice? = null
+            var observed = ""
+            val deadline = SystemClock.uptimeMillis() + 5_000L
+            do {
+                scenario.onActivity {
+                    val devices = InputDevice.getDeviceIds().asSequence()
+                        .mapNotNull { InputDevice.getDevice(it) }.toList()
+                    observed = devices.joinToString { "${it.id}:${it.name}:0x${it.sources.toString(16)}" }
+                    device = devices.firstOrNull { !it.isVirtual &&
+                        it.supportsSource(InputDevice.SOURCE_GAMEPAD) &&
+                        it.supportsSource(InputDevice.SOURCE_JOYSTICK) &&
+                        it.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null &&
+                        it.getMotionRange(MotionEvent.AXIS_Y, InputDevice.SOURCE_JOYSTICK) != null }
+                }
+                if (device != null) break
+                SystemClock.sleep(100L)
+            } while (SystemClock.uptimeMillis() < deadline)
+            assumeTrue("A foreground gamepad with joystick axes must be attached; observed: $observed", device != null)
+            val pad = requireNotNull(device)
             scenario.onActivity { activity ->
                 val game = Game()
                 ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
