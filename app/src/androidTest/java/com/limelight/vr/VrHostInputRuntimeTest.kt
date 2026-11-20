@@ -106,6 +106,7 @@ class VrHostInputRuntimeTest {
                     .invoke(game, activity)
                 game.prefConfig = PreferenceConfiguration()
                 game.grabbedInput = true
+                game.touchInputHandler = TouchInputHandler(game)
                 val connection = RecordingConnection(
                     activity.applicationContext,
                     requireNotNull(context.getSystemService(DisplayManager::class.java))
