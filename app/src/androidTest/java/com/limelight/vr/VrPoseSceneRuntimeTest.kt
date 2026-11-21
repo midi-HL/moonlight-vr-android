@@ -150,6 +150,8 @@ class VrPoseSceneRuntimeTest {
     private class PoseScene(context: Context, source: View) : CardboardView(context) {
         private val capture = VrWindowCapture(source, VrPanelView(context), false)
         private val renderer = VrTheaterRenderer(capture, false)
+        private val poseReadyField = VrTheaterRenderer::class.java.getDeclaredField("hasHeadPose")
+            .apply { isAccessible = true }
         private val nextTag = AtomicInteger()
         private val pose = AtomicReference(Pose(0, rotation(0f, 1f, 0f, 0f), true))
         val completedTag = AtomicInteger(-1)
@@ -180,7 +182,9 @@ class VrPoseSceneRuntimeTest {
                         renderer.recenter()
                         centeredTag = current.tag
                     }
-                    drawingTag = current.tag
+                    // A frame drawn while tracker initialization is pending uses a fixed view;
+                    // it must not carry a tag claiming this synthetic pose was already applied.
+                    drawingTag = if (poseReadyField.getBoolean(renderer)) current.tag else -1
                 }
                 override fun onDrawEye(eye: CardboardView.Eye) = renderer.onDrawEye(eye)
                 override fun onFinishFrame(viewport: Viewport) {

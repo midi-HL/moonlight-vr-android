@@ -20,11 +20,13 @@ class VrGamepadRouter {
     private data class Button(val deviceId: Int, val keyCode: Int)
 
     private val pressed = HashSet<Button>()
+    private val pressTimes = HashMap<Button, Long>()
     private val captured = HashSet<Button>()
     private var menuDevice: Int? = null
     private var menuHoldFired = false
     private var lastAxisMs = Long.MIN_VALUE
     private var lastHatDirection = 0
+    private var lastHatMs = Long.MIN_VALUE
     private var navAxisMs = Long.MIN_VALUE
     private var navHatDirection = 0
 
@@ -49,10 +51,12 @@ class VrGamepadRouter {
 
     fun reset() {
         pressed.clear()
+        pressTimes.clear()
         captured.clear()
         menuDevice = null
         menuHoldFired = false
         lastHatDirection = 0
+        lastHatMs = Long.MIN_VALUE
         navHatDirection = 0
         resetAxisHold()
     }
@@ -80,9 +84,15 @@ class VrGamepadRouter {
         deviceId: Int = 0,
         isRepeat: Boolean = false,
         captureUiMenuKeys: Boolean = false,
+        downTime: Long? = null,
     ): Command {
         val button = Button(deviceId, keyCode)
         if (action == VrKeys.ACTION_UP) {
+            val currentTime = pressTimes[button]
+            if (downTime != null && currentTime != null && currentTime != downTime) {
+                return if (button in captured || (panelOpen && isGamepadSource)) Command.Consumed else Command.PassThrough
+            }
+            pressTimes.remove(button)
             val owned = captured.remove(button)
             val wasPressed = pressed.remove(button)
             if (menuDevice == deviceId && !menuHoldActive(deviceId)) {
@@ -96,6 +106,18 @@ class VrGamepadRouter {
             } else Command.PassThrough
         }
         if (action != VrKeys.ACTION_DOWN || !isGamepadSource) return Command.PassThrough
+        val previousTime = pressTimes[button]
+        if (!isRepeat && downTime != null && previousTime != null && previousTime != downTime) {
+            // A new physical press proves the previous UP was lost. Keep true OS repeats
+            // suppressed, but let the user's next complete press recover immediately.
+            pressed.remove(button)
+            captured.remove(button)
+            pressTimes.remove(button)
+            if (menuDevice == deviceId && !menuHoldActive(deviceId)) {
+                menuDevice = null
+                menuHoldFired = false
+            }
+        }
         val wasMenuActive = menuHoldActive(deviceId)
         val alreadyDown = button in pressed
         if (alreadyDown || isRepeat) {
@@ -112,6 +134,7 @@ class VrGamepadRouter {
             } else Command.Consumed
         }
         pressed.add(button)
+        if (downTime != null) pressTimes[button] = downTime
 
         if (!vrEnabled) {
             val shoulder = keyCode == VrKeys.BUTTON_L1 || keyCode == VrKeys.BUTTON_R1
@@ -192,16 +215,18 @@ class VrGamepadRouter {
                 return true
             }
         }
-        if (navAxisMs != Long.MIN_VALUE && timeMs - navAxisMs < repeatMs) return false
         val direction = when {
+            hat != 0 -> hat
             abs(y) > deadZone && abs(y) >= abs(x) -> if (y < 0) -1 else 1
             abs(x) > deadZone -> if (x < 0) -2 else 2
             else -> 0
         }
         if (direction == 0) {
             navAxisMs = Long.MIN_VALUE
+            pendingNavDirection = 0
             return false
         }
+        if (navAxisMs != Long.MIN_VALUE && timeMs - navAxisMs < repeatMs) return false
         navAxisMs = timeMs
         pendingNavDirection = direction
         return true
@@ -216,11 +241,23 @@ class VrGamepadRouter {
     fun onHat(hatY: Float): Command = onHat(0f, hatY)
 
     /** Many pads report the D-pad as HAT axes instead of DPAD keycodes. */
-    fun onHat(hatX: Float, hatY: Float): Command {
+    fun onHat(hatX: Float, hatY: Float): Command = onHatInternal(hatX, hatY, null)
+
+    /** Runtime navigation repeats from the held sample, even on edge-only controllers. */
+    fun onHat(hatX: Float, hatY: Float, timeMs: Long): Command = onHatInternal(hatX, hatY, timeMs)
+
+    private fun onHatInternal(hatX: Float, hatY: Float, timeMs: Long?): Command {
         if (!panelOpen) return Command.PassThrough
         val direction = hatDirection(hatX, hatY)
-        if (direction == lastHatDirection) return Command.Consumed
+        if (direction == 0) {
+            lastHatDirection = 0
+            lastHatMs = Long.MIN_VALUE
+            return Command.Consumed
+        }
+        if (direction == lastHatDirection && (timeMs == null ||
+                (lastHatMs != Long.MIN_VALUE && timeMs - lastHatMs < repeatMs))) return Command.Consumed
         lastHatDirection = direction
+        if (timeMs != null) lastHatMs = timeMs
         return when (direction) {
             -1, 1 -> Command.Move(direction)
             -2, 2 -> if (editing) Command.Adjust(direction / 2) else Command.Consumed

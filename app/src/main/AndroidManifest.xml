@@ -232,6 +232,7 @@
         </activity>
         <activity
             android:name=".AppView"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
@@ -240,6 +241,7 @@
         </activity>
         <activity
             android:name=".SunshineWebUiActivity"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
@@ -249,6 +251,7 @@
         </activity>
         <activity
             android:name=".handbook.HandbookActivity"
+            android:screenOrientation="behind"
             android:exported="false"
             android:theme="@style/SettingsThemeCompat"
             android:resizeableActivity="true"
@@ -260,6 +263,7 @@
         </activity>
         <activity
             android:name=".preferences.StreamSettings"
+            android:screenOrientation="behind"
             android:theme="@style/SettingsThemeCompat"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
@@ -270,12 +274,14 @@
         </activity>
         <activity
             android:name=".preferences.OpenSourceNoticesActivity"
+            android:screenOrientation="behind"
             android:exported="false"
             android:theme="@style/SettingsThemeCompat"
             android:resizeableActivity="true"
             android:label="@string/open_source_title" />
         <activity
             android:name=".preferences.CrownStoreActivity"
+            android:screenOrientation="behind"
             android:theme="@style/SettingsThemeCompat"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
@@ -286,6 +292,7 @@
         </activity>
         <activity
             android:name=".preferences.CapabilityDiagnosticActivity"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
@@ -295,16 +302,19 @@
         </activity>
         <activity
             android:name=".preferences.StickCalibrationActivity"
+            android:screenOrientation="behind"
             android:exported="false"
             android:theme="@style/SettingsThemeCompat"
             android:label="@string/stick_calibration_title" />
         <activity
             android:name=".preferences.ControllerMouseSettingsActivity"
+            android:screenOrientation="behind"
             android:exported="false"
             android:theme="@style/SettingsThemeCompat"
             android:label="@string/title_controller_mouse_settings" />
         <activity
             android:name=".preferences.ControllerDiagnosticActivity"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
@@ -314,6 +324,7 @@
         </activity>
         <activity
             android:name=".preferences.AddComputerManually"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:enableOnBackInvokedCallback="true"
@@ -324,6 +335,7 @@
         </activity>
         <activity
             android:name=".Game"
+            android:screenOrientation="behind"
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density"
 
             android:supportsPictureInPicture="true"
@@ -413,6 +425,7 @@
 
         <activity
             android:name=".HelpActivity"
+            android:screenOrientation="behind"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">

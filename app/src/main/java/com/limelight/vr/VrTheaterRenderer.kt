@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLUtils
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import com.google.cardboard.sdk.CardboardView
@@ -128,6 +129,9 @@ class VrTheaterRenderer(
     private val relativeQuaternionScratch = FloatArray(4)
     private var hasHeadPose = false
     private var recenterPending = false
+    private val poseStartup = VrPoseStartupGate()
+    private var trackerHasGravity: (FloatArray, Int) -> Boolean = { _, _ -> true }
+    private var displayBasis: () -> Int = { 0 }
     private val headRotation = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
@@ -232,6 +236,12 @@ class VrTheaterRenderer(
 
     override fun onSurfaceChanged(width: Int, height: Int) = Unit
 
+    /** Install before setRenderer; standalone synthetic-pose fixtures have no sensor dependency. */
+    internal fun configureTrackerReadiness(hasGravity: (FloatArray, Int) -> Boolean, rotation: () -> Int) {
+        trackerHasGravity = hasGravity
+        displayBasis = rotation
+    }
+
     override fun onNewFrame(headTransform: HeadTransform) {
         // Both eyes and final composition must use one settings snapshot.
         frameSettings = VrSession.settings
@@ -242,11 +252,14 @@ class VrTheaterRenderer(
         val z = nextHeadQuaternion[2]
         val w = nextHeadQuaternion[3]
         val normSquared = x * x + y * y + z * z + w * w
+        val basis = displayBasis()
+        val basisReadyNow = poseStartup.update(nextHeadQuaternion, SystemClock.uptimeMillis(),
+            trackerHasGravity(headTransform.headView, basis), basis)
+        if (!poseStartup.ready) hasHeadPose = false
         if (normSquared.isFinite() && normSquared > 1e-8f) {
             nextHeadQuaternion.copyInto(headQuaternion)
-            val firstPose = !hasHeadPose
-            hasHeadPose = true
-            if (recenterPending || (firstPose && frameSettings.recenterOnEnter)) recenter()
+            hasHeadPose = poseStartup.ready
+            if (hasHeadPose && (recenterPending || (basisReadyNow && frameSettings.recenterOnEnter))) recenter()
         }
         // One capture per FRAME, not per eye. Both onDrawEye calls use the same
         // uploaded GL texture, so consuming on each eye would drop half the UI.

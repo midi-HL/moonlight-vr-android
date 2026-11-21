@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="vr_fullscreen_landscape_required">VR 需要橫向視窗。請退出直向分割畫面，再重新進入 VR。</string>
     <string name="vr_enter">進入 VR</string>
     <string name="vr_unavailable">VR 需要 Android 7.0 或更新版本、支援的 64 位元執行環境與 OpenGL ES 3.0。</string>
     <string name="vr_restart_stream">請返回 Moonlight 首頁，先啟用 VR，再以相容的 SDR 模式開始串流。</string>

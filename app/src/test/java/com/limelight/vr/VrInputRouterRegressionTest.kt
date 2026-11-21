@@ -7,6 +7,82 @@ import org.junit.Test
 
 class VrInputRouterRegressionTest {
     @Test
+    fun panelRecoversFromMissingReleaseAndIgnoresLateReleaseOfTheOldPress() {
+        val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
+        assertEquals(VrGamepadRouter.Command.Confirm, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.Confirm, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_UP,
+            true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, isRepeat = true, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_UP,
+            true, deviceId = 1, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.Confirm, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1200L))
+    }
+
+    @Test
+    fun timestampedChordKeepsDeviceOwnershipAndGameKeyEdgesPassThrough() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_START, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN,
+            true, deviceId = 2, downTime = 1001L))
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1002L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_START, VrKeys.ACTION_UP,
+            true, deviceId = 1, downTime = 999L))
+        assertEquals(VrGamepadRouter.Command.TogglePanel, router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,
+            true, deviceId = 1, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_UP,
+            true, deviceId = 1, downTime = 1100L))
+    }
+
+    @Test
+    fun heldHatRepeatsAtTheSameCadenceAsHeldStickInNativeUi() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertTrue(router.onUiNavigation(0f, 0f, 0f, 1f, 1000L))
+        assertEquals(1, router.drainNavDirection())
+        assertTrue(!router.onUiNavigation(0f, 0f, 0f, 1f, 1000L + router.repeatMs - 1))
+        assertTrue(router.onUiNavigation(0f, 0f, 0f, 1f, 1000L + router.repeatMs))
+        assertEquals(1, router.drainNavDirection())
+        assertTrue(!router.onUiNavigation(0f, 0f, 0f, 0f, 1000L + router.repeatMs + 1))
+        assertTrue(router.onUiNavigation(0f, 0f, 0f, 1f, 1000L + router.repeatMs + 2))
+        assertEquals(1, router.drainNavDirection())
+    }
+
+    @Test
+    fun neutralStickRearmsImmediatelyAndHatHasPriorityOverStick() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertTrue(router.onUiNavigation(0f, 0.8f, 0f, 0f, 1000L))
+        assertEquals(1, router.drainNavDirection())
+        assertTrue(!router.onUiNavigation(0f, 0f, 0f, 0f, 1001L))
+        assertTrue(router.onUiNavigation(0f, -0.8f, 0f, 0f, 1002L))
+        assertEquals(-1, router.drainNavDirection())
+        assertTrue(router.onUiNavigation(0f, -0.8f, 1f, 0f, 1003L))
+        assertEquals(2, router.drainNavDirection())
+        assertTrue(router.onUiNavigation(0f, -0.8f, 1f, 0f, 1003L + router.repeatMs))
+        assertEquals(2, router.drainNavDirection())
+    }
+
+    @Test
+    fun timedPanelHatRepeatsWithoutChangingLegacyEdgeOnlyCallers() {
+        val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
+        assertEquals(VrGamepadRouter.Command.Move(1), router.onHat(0f, 1f, 1000L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onHat(0f, 1f, 1000L + router.repeatMs - 1))
+        assertEquals(VrGamepadRouter.Command.Move(1), router.onHat(0f, 1f, 1000L + router.repeatMs))
+        router.resetAxisHold()
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onHat(0f, 1f))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onHat(0f, 0f, 1200L))
+        assertEquals(VrGamepadRouter.Command.Move(-1), router.onHat(0f, -1f, 1201L))
+    }
+
+    @Test
     fun heldMenuChordDoesNotCloseThePanelItOpened() {
         val router = VrGamepadRouter().apply { vrEnabled = true }
         assertEquals(VrGamepadRouter.Command.PassThrough,

@@ -7,6 +7,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.ContextWrapper
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -14,6 +15,7 @@ import android.os.Looper
 import android.os.Process
 import android.util.Log
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -44,6 +46,9 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     private val driverSnapshots = VrDriverSnapshotRouter()
     @Volatile private var activeActivity: Activity? = null
     private var activeHost: VrOverlayHost? = null
+    // Paused Activities can still be visible during a window transition. Their projection remains
+    // attached until onStop, but only the resumed host owns capture/input callbacks.
+    private val hosts = LinkedHashMap<Activity, VrOverlayHost>()
     private var systemBackRegistration: SystemBackRegistration? = null
     private val attached = AtomicBoolean(false)
 
@@ -98,6 +103,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     private fun filterUnsupportedSettings(value: VrSettings): VrSettings {
         if (value.enabled && !isSupported()) return value.copy(enabled = false)
+        val activity = activeActivity
+        if (value.enabled && activity != null && rejectsCurrentMultiWindow(activity)) {
+            showWindowRequirement(activity)
+            return value.copy(enabled = false)
+        }
         val game = activeActivity as? com.limelight.Game
         if (value.enabled && !enabled && game?.canEnterVrDuringStream() == false) {
             android.widget.Toast.makeText(game, com.limelight.R.string.vr_restart_stream, android.widget.Toast.LENGTH_LONG).show()
@@ -219,20 +229,20 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         // even if a different device opens the VR panel while that press is held.
         if (event.keyCode == VrKeys.BACK) {
             return when (backOwnership.onKey(event.action, event.deviceId, event.downTime,
-                    event.repeatCount > 0, event.isCanceled, enabled, backOwnedByHost, panelOpen)) {
+                    event.repeatCount > 0, event.isCanceled, enabled,
+                    backOwnedByHost || !panelOpen, panelOpen)) {
                 VrBackKeyOwnership.Result.PassThrough -> false
                 VrBackKeyOwnership.Result.Consumed -> true
                 VrBackKeyOwnership.Result.InvokeBack -> { onBackInvoked(); true }
             }
         }
         return handle(router.onKey(event.keyCode, event.action, isControllerKey,
-            event.deviceId, event.repeatCount > 0, captureUiMenuKeys))
+            event.deviceId, event.repeatCount > 0, captureUiMenuKeys, downTime = event.downTime))
     }
 
     fun onBackInvoked(): Boolean {
-        if (!enabled) return false
-        if (panelOpen) setPanelOpen(false)
-        else setEnabled(app ?: return true, false)
+        if (!enabled || !panelOpen) return false
+        if (editing) setEditing(false) else setPanelOpen(false)
         return true
     }
 
@@ -289,7 +299,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val owner = dialog.ownerActivity ?: findActivity(dialog.context) ?: return
         val decor = window.decorView
         if (window.callback !is VrActivityHooks) {
-            window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true)
+            window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true, inputWindow = window)
         }
         registerFloatingWindow(owner, decor, window)
     }
@@ -331,7 +341,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     ) {
         val owner = entry.owner.get() ?: return
         val decor = entry.decor.get() ?: return
-        val hidden = !forceVisible && enabled && activeActivity === owner && decor.isAttachedToWindow
+        val hidden = !forceVisible && enabled && hosts.containsKey(owner) && decor.isAttachedToWindow
         val window = entry.window?.get()
         if (window != null) {
             val attributes = window.attributes
@@ -393,14 +403,15 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     /** Returns true when the motion event was consumed by the VR layer. */
     fun onMotionEvent(event: MotionEvent): Boolean {
+        return onNavigationAxes(event.getAxisValue(VrKeys.AXIS_X), event.getAxisValue(VrKeys.AXIS_Y),
+            event.getAxisValue(VrKeys.AXIS_HAT_X), event.getAxisValue(VrKeys.AXIS_HAT_Y), event.eventTime)
+    }
+
+    internal fun onNavigationAxes(x: Float, y: Float, hatX: Float, hatY: Float, timeMs: Long): Boolean {
         if (!enabled || !panelOpen) return false
-        val hat = router.onHat(event.getAxisValue(VrKeys.AXIS_HAT_X), event.getAxisValue(VrKeys.AXIS_HAT_Y))
+        val hat = router.onHat(hatX, hatY, timeMs)
         if (hat is VrGamepadRouter.Command.Move || hat is VrGamepadRouter.Command.Adjust) return handle(hat)
-        return handle(router.onAxis(
-            event.getAxisValue(VrKeys.AXIS_X),
-            event.getAxisValue(VrKeys.AXIS_Y),
-            event.eventTime,
-        ))
+        return handle(router.onAxis(x, y, timeMs))
     }
 
     private fun handle(command: VrGamepadRouter.Command): Boolean {
@@ -480,27 +491,51 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun refreshHosts() {
-        syncFloatingWindows()
-        val activity = activeActivity ?: return
-        if (enabled) {
-            // Lock the destination window before creating Cardboard's SurfaceView. Creating the
-            // GL host first lets a newly resumed Activity expose its default portrait window for
-            // a frame while the landscape request is still being applied.
+        if (!enabled) {
+            releaseAllHosts()
+        } else activeActivity?.let { activity ->
             applyImmersive(activity)
-            if (activeHost == null) {
-                val decor = activity.window.decorView as? ViewGroup ?: return
-                val host = VrOverlayHost(activity, decor)
-                host.install()
-                activeHost = host
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && systemBackRegistration == null) {
-                systemBackRegistration = SystemBackRegistration(activity)
-            }
-        } else {
-            releaseActiveHost()
+            activeHost = ensureHost(activity)?.also { it.resume() }
         }
+        syncSystemBackRegistration()
+        syncFloatingWindows()
         bindActiveCallbacks()
         onWindowDirty?.invoke()
+    }
+
+    private fun ensureHost(activity: Activity): VrOverlayHost? {
+        hosts[activity]?.let { return it }
+        val decor = activity.window.decorView as? ViewGroup ?: return null
+        return VrOverlayHost(activity, decor) { onHostWindowChanged(activity) }.also { host ->
+            hosts[activity] = host
+            host.install()
+            if (activeActivity !== activity) host.pause()
+        }
+    }
+
+    private fun rejectsCurrentMultiWindow(activity: Activity): Boolean {
+        val decor = activity.window.decorView
+        return VrWindowPolicy.rejectsMultiWindow(
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity.isInMultiWindowMode,
+            activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE,
+            decor.width, decor.height)
+    }
+
+    private fun showWindowRequirement(activity: Activity) {
+        android.widget.Toast.makeText(activity, com.limelight.R.string.vr_fullscreen_landscape_required,
+            android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    private fun onHostWindowChanged(activity: Activity) {
+        if (!enabled || activeActivity !== activity || !rejectsCurrentMultiWindow(activity)) return
+        // Configuration changes can arrive inside a pre-draw traversal. Restore the ordinary
+        // window on the next main-loop turn, rechecking ownership after any Activity handoff.
+        mainHandler.post {
+            if (enabled && activeActivity === activity && rejectsCurrentMultiWindow(activity)) {
+                setEnabled(activity, false)
+                showWindowRequirement(activity)
+            }
+        }
     }
 
     /** Host root rebuilding may restore its normal 2D system-bar flags after setContentView. */
@@ -519,13 +554,30 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    private fun releaseActiveHost() {
+    private fun clearSystemBackRegistration() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             systemBackRegistration?.unregister()
         }
         systemBackRegistration = null
-        activeHost?.release()
-        activeHost = null
+    }
+
+    private fun syncSystemBackRegistration() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val activity = activeActivity
+        if (!enabled || !panelOpen || activity == null) clearSystemBackRegistration()
+        else if (systemBackRegistration == null) systemBackRegistration = SystemBackRegistration(activity)
+    }
+
+    private fun releaseHost(activity: Activity) {
+        val host = hosts.remove(activity) ?: return
+        if (activeHost === host) activeHost = null
+        host.release()
+        restoreFloatingWindows(activity)
+    }
+
+    private fun releaseAllHosts() {
+        clearSystemBackRegistration()
+        hosts.keys.toList().forEach(::releaseHost)
     }
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
@@ -546,30 +598,62 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun cancelPendingInput() {
-        cancelHold()
+        onWindowInputCanceled()
         backOwnership.clear()
+    }
+
+    /** Focus may move to a native dialog without ending a host-owned BACK press. */
+    internal fun onWindowInputCanceled() {
+        cancelHold()
         router.reset()
         tapCancelled = true
     }
 
     // ---- ActivityLifecycleCallbacks: attach an overlay to every screen ----
 
+    override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
+        restoreAutomaticLaunchOrientation(activity)
+    }
+
+    private fun restoreAutomaticLaunchOrientation(activity: Activity) {
+        // Manifest BEHIND is only the initial VR handoff contract. Ordinary 2D destinations
+        // retain their original automatic rotation, including launches from a fixed Game.
+        if (!enabled && activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        // Pre-created callbacks start at API 29. On older versions do this only if the
+        // Activity has not already chosen an explicit orientation during its own onCreate.
+        restoreAutomaticLaunchOrientation(activity)
         val window = activity.window ?: return
         val delegate = window.callback ?: activity
         if (delegate !is VrActivityHooks) {
             window.callback = VrActivityHooks(activity, delegate)
         }
-        // Apply the settled VR window contract before the first resume/draw callback. This closes
-        // the portrait flash window when navigating between PcView, settings and Game.
-        if (enabled) applyImmersive(activity)
+        // Cover the destination before its first draw. An orientation request is asynchronous;
+        // the host waits for the actual landscape layout before constructing Cardboard.
+        if (enabled) {
+            applyImmersive(activity)
+            ensureHost(activity)
+        }
     }
 
     override fun onActivityStarted(activity: Activity) = Unit
 
     override fun onActivityResumed(activity: Activity) {
-        if (activeActivity !== activity) releaseActiveHost()
+        if (activeActivity !== activity) {
+            activeHost?.pause()
+            clearSystemBackRegistration()
+            cancelPendingInput()
+        }
         activeActivity = activity
+        if (enabled && rejectsCurrentMultiWindow(activity)) {
+            setEnabled(activity, false)
+            showWindowRequirement(activity)
+            return
+        }
         // Another screen may have enabled VR while this stream was kept alive in the background.
         // Recheck the settled Game presentation path before creating its stereo surface.
         if (enabled && activity is com.limelight.Game && !activity.canEnterVrDuringStream()) {
@@ -583,19 +667,22 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityPaused(activity: Activity) {
         if (activeActivity === activity) {
-            restoreFloatingWindows(activity)
             cancelPendingInput()
+            activeHost?.pause()
             activeActivity = null
-            releaseActiveHost()
+            activeHost = null
+            clearSystemBackRegistration()
             bindActiveCallbacks()
         }
     }
 
-    override fun onActivityStopped(activity: Activity) = Unit
+    override fun onActivityStopped(activity: Activity) {
+        releaseHost(activity)
+    }
 
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-    /** Only the resumed Activity owns a projection and its GL callbacks. */
+    /** Paused hosts retain their visible projection; only the resumed host owns live callbacks. */
     private fun bindActiveCallbacks() {
         val host = activeHost
         onRecenter = host?.let { { it.theaterView()?.recenter() } }
@@ -604,6 +691,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     override fun onActivityDestroyed(activity: Activity) {
         onActivityPaused(activity)
+        releaseHost(activity)
         restoreFloatingWindows(activity)
         dialogDecors.removeAll { it.owner.get() == null || it.owner.get() === activity }
         windowStates.remove(activity)
@@ -616,7 +704,9 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val orientation: Int?,
         val layoutNoLimits: Boolean,
         val cutoutMode: Int?,
+        val floatingLayout: FloatingActivityLayout?,
     )
+    private data class FloatingActivityLayout(val width: Int, val height: Int, val gravity: Int, val dim: Float)
     private val windowStates = HashMap<Activity, WindowState>()
 
     private fun applyImmersive(activity: Activity) {
@@ -625,6 +715,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
             return
         }
         val window = activity.window
+        val floating = activity.hasFloatingOrTranslucentWindow()
         @Suppress("DEPRECATION")
         windowStates.getOrPut(activity) {
             val attrs = window.attributes
@@ -635,17 +726,33 @@ object VrSession : Application.ActivityLifecycleCallbacks {
                 layoutNoLimits = (attrs.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) != 0,
                 cutoutMode = if (android.os.Build.VERSION.SDK_INT >= 28)
                     attrs.layoutInDisplayCutoutMode else null,
+                floatingLayout = if (floating) FloatingActivityLayout(
+                    attrs.width, attrs.height, attrs.gravity, attrs.dimAmount) else null,
             )
         }
         // Android 8.0 rejects orientation requests from floating or translucent Activities.
         // Multi-window hosts already follow the display orientation.
         if ((Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !activity.isInMultiWindowMode) &&
-            !activity.hasFloatingOrTranslucentWindow()) {
+            !floating) {
             val state = windowStates.getValue(activity)
             if (state.orientation == null) {
-                windowStates[activity] = state.copy(orientation = activity.requestedOrientation)
+                val originalOrientation = activity.requestedOrientation.let { orientation ->
+                    if (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND)
+                        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else orientation
+                }
+                windowStates[activity] = state.copy(orientation = originalOrientation)
             }
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        if (floating) {
+            // A dialog-sized Activity would place both eyes inside the little native window.
+            // Project it over the full display while keeping its inherited source orientation.
+            window.attributes = window.attributes.also {
+                it.width = ViewGroup.LayoutParams.MATCH_PARENT
+                it.height = ViewGroup.LayoutParams.MATCH_PARENT
+                it.gravity = Gravity.FILL
+                it.dimAmount = 0f
+            }
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         if (android.os.Build.VERSION.SDK_INT >= 28) {
@@ -686,6 +793,14 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         if (android.os.Build.VERSION.SDK_INT >= 28 && cutout != null) {
             activity.window.attributes = activity.window.attributes.also {
                 it.layoutInDisplayCutoutMode = cutout
+            }
+        }
+        state.floatingLayout?.let { original ->
+            activity.window.attributes = activity.window.attributes.also {
+                it.width = original.width
+                it.height = original.height
+                it.gravity = original.gravity
+                it.dimAmount = original.dim
             }
         }
     }

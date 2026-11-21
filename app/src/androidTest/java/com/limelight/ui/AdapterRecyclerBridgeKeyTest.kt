@@ -52,6 +52,7 @@ class AdapterRecyclerBridgeKeyTest {
             rule.runOnUiThread { bound = recycler.findViewHolderForAdapterPosition(0) != null }
             bound
         }
+        rule.runOnUiThread { card().apply { isFocusableInTouchMode = true; requestFocus() } }
     }
 
     @After
@@ -92,12 +93,14 @@ class AdapterRecyclerBridgeKeyTest {
     fun fallbackAKeyClicksOnceAndCanceledReleaseDoesNotClick() {
         rule.runOnUiThread {
             val card = card()
-            card.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
-            card.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+            val firstDown = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A)
+            card.dispatchKeyEvent(firstDown)
+            card.dispatchKeyEvent(KeyEvent.changeAction(firstDown, KeyEvent.ACTION_UP))
             assertEquals(1, clicks)
-            card.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+            val secondDown = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A)
+            card.dispatchKeyEvent(secondDown)
             val canceled = KeyEvent.changeFlags(
-                KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A), KeyEvent.FLAG_CANCELED
+                KeyEvent.changeAction(secondDown, KeyEvent.ACTION_UP), KeyEvent.FLAG_CANCELED
             )
             card.dispatchKeyEvent(canceled)
             assertFalse(card.isPressed)
@@ -113,6 +116,18 @@ class AdapterRecyclerBridgeKeyTest {
         rule.runOnUiThread {
             card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_UP))
             assertEquals("A long hold must still confirm when no long action exists", 1, clicks)
+        }
+    }
+
+    @Test
+    fun newPhysicalPressRecoversImmediatelyWhenThePreviousReleaseWasLost() {
+        rule.runOnUiThread {
+            val now = SystemClock.uptimeMillis()
+            card().dispatchKeyEvent(padKey(now, KeyEvent.ACTION_DOWN))
+            card().dispatchKeyEvent(padKey(now + 1, KeyEvent.ACTION_DOWN))
+            card().dispatchKeyEvent(padKey(now + 1, KeyEvent.ACTION_UP))
+            assertEquals(1, clicks)
+            assertFalse(card().isPressed)
         }
     }
 

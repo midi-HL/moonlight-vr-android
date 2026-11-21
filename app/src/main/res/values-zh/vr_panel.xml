@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="vr_fullscreen_landscape_required">VR 需要横屏窗口。请退出竖向分屏，再重新进入 VR。</string>
     <string name="vr_surface_failed">解码器未接受 VR 输出，已返回 2D。恢复成功时会保留串流连接。</string>
     <string name="vr_enter">进入 VR</string>
     <string name="vr_unavailable">VR 需要 Android 7.0 或更新版本、受支持的 64 位运行环境和 OpenGL ES 3.0。</string>

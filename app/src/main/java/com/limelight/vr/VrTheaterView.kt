@@ -5,6 +5,7 @@ import android.util.Log
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import com.google.cardboard.sdk.CardboardView
 
 /**
@@ -23,11 +24,16 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
     val panelView = VrPanelView(context)
     private val capture = VrWindowCapture(decor, panelView, isVideoHost)
     private val renderer = VrTheaterRenderer(capture, isVideoHost)
+    private val trackerReadiness = VrTrackerReadiness(context)
     private var resumed = false
     private var released = false
+    private var presentationActive = true
 
     init {
         promoteGlSurface()
+        @Suppress("DEPRECATION")
+        val trackerDisplay = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
+        renderer.configureTrackerReadiness(trackerReadiness::matches, { trackerDisplay.rotation })
         setRenderer(renderer)
         setKeepScreenOn(true)
         setStereoRenderMode(true)
@@ -37,8 +43,9 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
                 removeOnAttachStateChangeListener(this)
                 Log.i(TAG, "attached: onResume")
                 onResume()
+                trackerReadiness.resume()
                 resumed = true
-                capture.markDirty()
+                if (presentationActive) capture.resume() else capture.pause()
             }
             override fun onViewDetachedFromWindow(v: View) = Unit
         })
@@ -63,7 +70,19 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
     }
 
     fun markDirty() {
-        if (!released && resumed) capture.markDirty()
+        if (!released && resumed && presentationActive) capture.markDirty()
+    }
+
+    /** Keep the visible stereo surface/tracker through onPause; onStop owns final teardown. */
+    fun pausePresentation() {
+        presentationActive = false
+        capture.pause()
+    }
+
+    fun resumePresentation() {
+        if (released) return
+        presentationActive = true
+        if (resumed) capture.resume()
     }
 
     /** Marshalled onto the GL thread so head-pose state is not read concurrently. */
@@ -73,6 +92,7 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
         if (released) return
         released = true
         Log.i(TAG, "release: onDestroy")
+        trackerReadiness.pause()
         capture.stop()
         shutdownCalled()
         if (resumed) {
@@ -95,6 +115,7 @@ class VrTheaterView(context: Context, decor: View, private val isVideoHost: Bool
     }
 
     override fun onDetachedFromWindow() {
+        trackerReadiness.pause()
         capture.stop()
         super.onDetachedFromWindow()
     }

@@ -22,6 +22,7 @@ class VrWindowCapture(
     private val sourceLocation = IntArray(2)
     private val dialogLocation = IntArray(2)
     private var stopped = false
+    private var paused = false
     private var lastPanelSettings: VrSettings? = null
     private var lastPanelIndex = -1
     private var lastPanelEditing = false
@@ -29,19 +30,19 @@ class VrWindowCapture(
 
     private val tick = object : Runnable {
         override fun run() {
-            if (stopped) return
+            if (stopped || paused) return
             val width = source.width
             val height = source.height
             if (width > 0 && height > 0) captureScene(width, height)
             capturePanel()
-            if (!stopped) handler.postDelayed(this, FRAME_MS)
+            if (!stopped && !paused) handler.postDelayed(this, FRAME_MS)
         }
     }
 
     init { markDirty() }
 
     fun markDirty() {
-        if (stopped) return
+        if (stopped || paused) return
         lastPanelSettings = null
         handler.removeCallbacks(tick)
         handler.post(tick)
@@ -52,6 +53,18 @@ class VrWindowCapture(
         handler.removeCallbacks(tick)
         sceneFrames.close()
         panelFrames.close()
+    }
+
+    /** A paused-but-visible Activity keeps its last stereo image, without capturing hidden UI. */
+    fun pause() {
+        paused = true
+        handler.removeCallbacks(tick)
+    }
+
+    fun resume() {
+        if (stopped) return
+        paused = false
+        markDirty()
     }
 
     // Context loss can destroy a GL renderer while this capture remains attached.

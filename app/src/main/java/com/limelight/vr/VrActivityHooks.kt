@@ -1,6 +1,7 @@
 package com.limelight.vr
 
 import android.app.Activity
+import android.hardware.input.InputManager
 import android.os.Build
 import android.view.ActionMode
 import android.view.KeyEvent
@@ -23,14 +24,18 @@ class VrActivityHooks(
     private val activity: Activity,
     private val delegate: Window.Callback,
     private val inDialog: Boolean = false,
+    private val inputWindow: Window = activity.window,
 ) : Window.Callback {
+    private val inputState = VrInputDispatcher.WindowState(
+        activity.getSystemService(android.content.Context.INPUT_SERVICE) as? InputManager,
+    ) { inputWindow.decorView.findFocus() }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        return VrInputDispatcher.dispatchKey(activity, event, inDialog, delegate::dispatchKeyEvent)
+        return VrInputDispatcher.dispatchKey(activity, event, inDialog, inputState, delegate::dispatchKeyEvent)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (VrInputDispatcher.dispatchMotion(activity, event, inDialog, delegate::dispatchKeyEvent)) return true
+        if (VrInputDispatcher.dispatchMotion(activity, event, inDialog, inputState, delegate::dispatchKeyEvent)) return true
         return delegate.dispatchGenericMotionEvent(event)
     }
 
@@ -81,11 +86,16 @@ class VrActivityHooks(
     override fun onActionModeStarted(mode: ActionMode) = delegate.onActionModeStarted(mode)
     override fun onActionModeFinished(mode: ActionMode) = delegate.onActionModeFinished(mode)
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) =
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        if (inputState.onWindowFocusChanged(hasFocus)) VrSession.onWindowInputCanceled()
         delegate.onWindowFocusChanged(hasFocus)
+    }
 
     override fun onAttachedToWindow() = delegate.onAttachedToWindow()
-    override fun onDetachedFromWindow() = delegate.onDetachedFromWindow()
+    override fun onDetachedFromWindow() {
+        if (inputState.onWindowFocusChanged(false)) VrSession.onWindowInputCanceled()
+        delegate.onDetachedFromWindow()
+    }
 
     override fun onWindowAttributesChanged(attrs: WindowManager.LayoutParams) =
         delegate.onWindowAttributesChanged(attrs)

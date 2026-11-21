@@ -24,16 +24,21 @@ class AdapterRecyclerBridge(
     private var onItemKeyListener: OnItemKeyListener? = null
     private var onItemLongClickListener: OnItemLongClickListener? = null
 
-    // A键长按检测相关
-    private var aKeyDownTime = 0L
+    private data class ConfirmPress(
+        val holder: VH, val position: Int, val deviceId: Int, val keyCode: Int, val downTime: Long,
+        var longClickHandled: Boolean = false,
+    )
+    private var confirmPress: ConfirmPress? = null
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var longPressRunnable: Runnable? = null
     private val dataSetObserver = object : DataSetObserver() {
         override fun onChanged() {
+            cancelConfirmPress()
             notifyDataSetChanged()
         }
 
         override fun onInvalidated() {
+            cancelConfirmPress()
             notifyDataSetChanged()
         }
     }
@@ -55,6 +60,7 @@ class AdapterRecyclerBridge(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         if (baseAdapter == null) return
+        if (confirmPress?.holder === holder) cancelConfirmPress()
 
         var needsListenerSetup = holder.container.tag == null
 
@@ -77,6 +83,11 @@ class AdapterRecyclerBridge(
             holder.container.isFocusable = true
             holder.container.isClickable = true
             holder.container.tag = "listeners_set"
+            val previousFocusListener = holder.container.onFocusChangeListener
+            holder.container.onFocusChangeListener = View.OnFocusChangeListener { view, hasFocus ->
+                previousFocusListener?.onFocusChange(view, hasFocus)
+                if (!hasFocus && confirmPress?.holder === holder) cancelConfirmPress()
+            }
 
             holder.container.setOnClickListener {
                 val adapterPosition = holder.bindingAdapterPosition
@@ -101,24 +112,43 @@ class AdapterRecyclerBridge(
 
                 // 适配器内部处理A键长按检测
                 if (isConfirmKey) {
-                    holder.container.isPressed = event.action == KeyEvent.ACTION_DOWN && !event.isCanceled
                     when (event.action) {
                         KeyEvent.ACTION_DOWN -> {
-                            aKeyDownTime = System.currentTimeMillis()
-                            longPressRunnable = Runnable {
-                                val pos = holder.bindingAdapterPosition
-                                if (pos != RecyclerView.NO_POSITION) {
-                                    onItemLongClickListener?.onItemLongClick(pos, baseAdapter.getItem(pos))
-                                }
+                            if (event.isCanceled || event.repeatCount > 0) {
+                                return@setOnKeyListener true
                             }
-                            longPressHandler.postDelayed(longPressRunnable!!, LONG_PRESS_DURATION)
+                            val previous = confirmPress
+                            if (previous != null) {
+                                if (previous.deviceId == event.deviceId && previous.keyCode == keyCode &&
+                                    previous.downTime == event.downTime) return@setOnKeyListener true
+                                cancelConfirmPress()
+                            }
+                            val press = ConfirmPress(holder, adapterPosition, event.deviceId, keyCode, event.downTime)
+                            confirmPress = press
+                            holder.container.isPressed = true
+                            if (onItemLongClickListener != null) {
+                                val runnable = Runnable {
+                                    if (confirmPress !== press) return@Runnable
+                                    longPressRunnable = null
+                                    val pos = holder.bindingAdapterPosition
+                                    if (pos != press.position || !holder.container.hasFocus()) {
+                                        cancelConfirmPress()
+                                    } else {
+                                        press.longClickHandled = onItemLongClickListener?.onItemLongClick(
+                                            pos, baseAdapter.getItem(pos)) == true
+                                    }
+                                }
+                                longPressRunnable = runnable
+                                longPressHandler.postDelayed(runnable, LONG_PRESS_DURATION)
+                            }
                             return@setOnKeyListener true
                         }
                         KeyEvent.ACTION_UP -> {
-                            val pressDuration = System.currentTimeMillis() - aKeyDownTime
-                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-                            longPressRunnable = null
-                            if (!event.isCanceled && pressDuration < LONG_PRESS_DURATION && adapterPosition != RecyclerView.NO_POSITION) {
+                            val press = confirmPress ?: return@setOnKeyListener true
+                            if (press.holder !== holder || press.deviceId != event.deviceId ||
+                                press.keyCode != keyCode || press.downTime != event.downTime) return@setOnKeyListener true
+                            cancelConfirmPress()
+                            if (!event.isCanceled && !press.longClickHandled && adapterPosition == press.position) {
                                 onItemClickListener?.onItemClick(adapterPosition, baseAdapter.getItem(adapterPosition))
                             }
                             return@setOnKeyListener true
@@ -142,9 +172,16 @@ class AdapterRecyclerBridge(
     override fun getItemCount(): Int = baseAdapter?.count ?: 0
 
     override fun onViewDetachedFromWindow(holder: VH) {
+        if (confirmPress?.holder === holder) cancelConfirmPress()
         holder.container.isPressed = false
         holder.container.jumpDrawablesToCurrentState()
         super.onViewDetachedFromWindow(holder)
+    }
+
+    override fun onViewRecycled(holder: VH) {
+        if (confirmPress?.holder === holder) cancelConfirmPress()
+        holder.container.isPressed = false
+        super.onViewRecycled(holder)
     }
 
     override fun getItemId(position: Int): Long {
@@ -176,12 +213,18 @@ class AdapterRecyclerBridge(
     }
 
     fun cleanup() {
-        longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
-        longPressRunnable = null
+        cancelConfirmPress()
         if (observerRegistered) {
             baseAdapter?.unregisterDataSetObserver(dataSetObserver)
             observerRegistered = false
         }
+    }
+
+    private fun cancelConfirmPress() {
+        longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+        longPressRunnable = null
+        confirmPress?.holder?.container?.apply { isPressed = false; cancelLongPress() }
+        confirmPress = null
     }
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {

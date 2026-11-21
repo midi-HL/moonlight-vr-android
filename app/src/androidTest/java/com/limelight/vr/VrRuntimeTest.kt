@@ -58,6 +58,7 @@ class VrRuntimeTest {
         instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
         val launch = Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val scenario = ActivityScenario.launch<PcView>(launch)
+        var owner: PcView? = null
         var dialog: AlertDialog? = null
         var confirmedFromRealDpad = false
         var leakedUiMenuKey = false
@@ -70,9 +71,15 @@ class VrRuntimeTest {
         }
         try {
             scenario.onActivity { activity ->
+                owner = activity
                 assertTrue("Device must support the bundled Cardboard runtime", VrSession.isSupported())
                 VrSession.setEnabled(activity, true)
                 assertTrue(VrSession.enabled)
+            }
+            waitForUiCondition("The real landscape layout did not start its stereo host") {
+                owner?.let { countTheaters(it.window.decorView) == 1 } == true
+            }
+            scenario.onActivity { activity ->
                 val decor = activity.window.decorView
                 assertEquals(1, countTheaters(decor))
                 val time = SystemClock.uptimeMillis()

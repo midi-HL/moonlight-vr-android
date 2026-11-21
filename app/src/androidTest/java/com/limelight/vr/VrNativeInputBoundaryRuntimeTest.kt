@@ -21,6 +21,141 @@ import org.junit.runner.RunWith
 class VrNativeInputBoundaryRuntimeTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun keyboardEscapeAndNativeBackKeepBalancedCancellationOwnership() = withWindow { activity, button ->
+        var dismissals = 0
+        button.setOnKeyListener { _, code, event ->
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (event.action == KeyEvent.ACTION_UP) dismissals++
+                true
+            } else false
+        }
+        val callback = activity.window.callback
+        for (code in listOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE)) {
+            val now = SystemClock.uptimeMillis()
+            fun event(action: Int, time: Long = now) = KeyEvent(time, SystemClock.uptimeMillis(), action,
+                code, 0, 0, 16, 0, 0, InputDevice.SOURCE_KEYBOARD)
+            callback.dispatchKeyEvent(event(KeyEvent.ACTION_UP))
+            callback.dispatchKeyEvent(event(KeyEvent.ACTION_DOWN, now + 1))
+            callback.dispatchKeyEvent(KeyEvent.changeFlags(event(KeyEvent.ACTION_UP, now + 1), KeyEvent.FLAG_CANCELED))
+            callback.dispatchKeyEvent(event(KeyEvent.ACTION_DOWN, now + 2))
+            callback.dispatchKeyEvent(event(KeyEvent.ACTION_UP, now + 2))
+        }
+        assertEquals("Only the two complete uncanceled key sequences may dismiss", 2, dismissals)
+        assertTrue(VrSession.enabled)
+    }
+
+    @Test fun lateDetachOfAnAlreadyBlurredWindowDoesNotCancelTheNextWindowsMenuChord() {
+        withWindowAcrossWaits { scenario ->
+            scenario.onActivity { activity ->
+                val oldWindow = VrActivityHooks(activity, activity)
+                val newWindow = VrActivityHooks(activity, activity)
+                oldWindow.onWindowFocusChanged(false)
+                newWindow.onWindowFocusChanged(true)
+                val now = SystemClock.uptimeMillis()
+                newWindow.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_START))
+                newWindow.dispatchKeyEvent(key(now + 1, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_SELECT))
+                oldWindow.onDetachedFromWindow()
+            }
+            SystemClock.sleep(VrKeys.MENU_LONG_PRESS_MS + 150)
+            scenario.onActivity { assertTrue("A detached old window must not cancel the new window's menu hold", VrSession.panelOpen) }
+        }
+    }
+
+    @Test fun nativeButtonFallbackConfirmsExactlyOnce() = withWindow { activity, button ->
+        var confirmations = 0
+        button.setOnClickListener { confirmations++ }
+        val callback = activity.window.callback
+        val now = SystemClock.uptimeMillis()
+        callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals(1, confirmations)
+        assertFalse(button.isPressed)
+    }
+
+    @Test fun freshPressAfterMissingReleaseConfirmsOnItsFirstAttempt() = withWindow { activity, button ->
+        var confirmations = 0
+        button.setOnKeyListener { _, key, event ->
+            if (key == KeyEvent.KEYCODE_BUTTON_A) {
+                if (event.action == KeyEvent.ACTION_UP) confirmations++
+                true
+            } else false
+        }
+        val callback = activity.window.callback
+        val now = SystemClock.uptimeMillis()
+        callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        callback.dispatchKeyEvent(key(now + 1, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        callback.dispatchKeyEvent(key(now + 1, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals(1, confirmations)
+        assertFalse(button.isPressed)
+    }
+
+    @Test fun validAReleaseKeepsNativeUpOnlyActionAndLeavesNoMappedPress() = withWindow { activity, button ->
+        var activations = 0
+        button.setOnKeyListener { _, key, event ->
+            if (key == KeyEvent.KEYCODE_BUTTON_A && event.action == KeyEvent.ACTION_UP) {
+                activations++
+                true
+            } else false
+        }
+        val callback = activity.window.callback
+        repeat(2) {
+            val now = SystemClock.uptimeMillis()
+            callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+            callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+            assertFalse("Native UP-only actions must release fallback feedback", button.isPressed)
+        }
+        assertEquals(2, activations)
+    }
+
+    @Test fun nativeBDownOnlyActionOwnsRepeatsAndItsUnhandledRelease() = withWindow { activity, button ->
+        var dismissals = 0
+        var leakedBack = 0
+        button.setOnKeyListener { _, key, event ->
+            when {
+                key == KeyEvent.KEYCODE_BUTTON_B && event.action == KeyEvent.ACTION_DOWN -> { dismissals++; true }
+                key == KeyEvent.KEYCODE_BACK -> { leakedBack++; true }
+                else -> false
+            }
+        }
+        val callback = activity.window.callback
+        val now = SystemClock.uptimeMillis()
+        assertTrue(callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B)))
+        assertTrue(callback.dispatchKeyEvent(KeyEvent.changeTimeRepeat(key(now, KeyEvent.ACTION_DOWN,
+            KeyEvent.KEYCODE_BUTTON_B), now + 20, 1)))
+        assertTrue("An unhandled UP must not trigger Android B fallback",
+            callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B)))
+        assertEquals(1, dismissals)
+        assertEquals(0, leakedBack)
+        assertTrue(VrSession.enabled)
+    }
+
+    @Test fun nativeBUpOnlyActionPrecedesBackFallbackAndUnhandledBReturnsOnce() = withWindow { activity, button ->
+        var dismissals = 0
+        var backs = 0
+        var ownB = true
+        button.setOnKeyListener { _, key, event ->
+            when {
+                ownB && key == KeyEvent.KEYCODE_BUTTON_B && event.action == KeyEvent.ACTION_UP -> { dismissals++; true }
+                key == KeyEvent.KEYCODE_BACK -> { if (event.action == KeyEvent.ACTION_UP) backs++; true }
+                else -> false
+            }
+        }
+        val callback = activity.window.callback
+        fun pressB() {
+            val now = SystemClock.uptimeMillis()
+            callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B))
+            callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B))
+        }
+        pressB()
+        assertEquals(1, dismissals)
+        assertEquals(0, backs)
+        ownB = false
+        pressB()
+        assertEquals(1, backs)
+        assertTrue(VrSession.enabled)
+    }
+
     @Test fun canceledAndOrphanConfirmReleaseNeverActivatesNativeUi() = withWindow { activity, button ->
         var activations = 0
         button.setOnKeyListener { _, key, event ->
@@ -37,6 +172,16 @@ class VrNativeInputBoundaryRuntimeTest {
         callback.dispatchKeyEvent(KeyEvent.changeFlags(key(now + 1, KeyEvent.ACTION_UP,
             KeyEvent.KEYCODE_BUTTON_A), KeyEvent.FLAG_CANCELED))
         assertEquals("A canceled press must not activate a custom native UP handler", 0, activations)
+        assertFalse(button.isPressed)
+        callback.dispatchKeyEvent(key(now + 2, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        callback.onWindowFocusChanged(false)
+        assertFalse("Losing a window must clear the old fallback pressed state", button.isPressed)
+        callback.onWindowFocusChanged(true)
+        callback.dispatchKeyEvent(key(now + 2, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals(0, activations)
+        callback.dispatchKeyEvent(key(now + 3, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        callback.dispatchKeyEvent(key(now + 3, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals("Canceling a press must not block the next valid confirmation", 1, activations)
     }
 
     @Test fun repeatedConfirmDownIsDeliveredOnceAndReleaseKeepsItsOriginalMapping() = withWindow { activity, button ->

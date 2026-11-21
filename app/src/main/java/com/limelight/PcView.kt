@@ -712,17 +712,33 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
 
         lateinit var popup: PopupWindow
         val menu = object : LinearLayout(this) {
+            private val vrInputState = com.limelight.vr.VrInputDispatcher.WindowState(
+                this@PcView.getSystemService(android.content.Context.INPUT_SERVICE) as? android.hardware.input.InputManager,
+            ) { findFocus() }
+
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                return com.limelight.vr.VrInputDispatcher.dispatchKey(this@PcView, event, inDialog = true) { key ->
+                return com.limelight.vr.VrInputDispatcher.dispatchKey(this@PcView, event, inDialog = true,
+                    state = vrInputState) { key ->
                     UiDismissKeyHandler.handle(key.action, key.keyCode, popup::dismiss) || super.dispatchKeyEvent(key)
                 }
             }
 
             override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
-                if (com.limelight.vr.VrInputDispatcher.dispatchMotion(this@PcView, event, inDialog = true) {
+                if (com.limelight.vr.VrInputDispatcher.dispatchMotion(this@PcView, event, inDialog = true,
+                    state = vrInputState) {
                         super.dispatchKeyEvent(it)
                     }) return true
                 return super.dispatchGenericMotionEvent(event)
+            }
+
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                if (vrInputState.onWindowFocusChanged(hasWindowFocus)) com.limelight.vr.VrSession.onWindowInputCanceled()
+                super.onWindowFocusChanged(hasWindowFocus)
+            }
+
+            override fun onDetachedFromWindow() {
+                if (vrInputState.onWindowFocusChanged(false)) com.limelight.vr.VrSession.onWindowInputCanceled()
+                super.onDetachedFromWindow()
             }
         }.apply {
             orientation = LinearLayout.VERTICAL
