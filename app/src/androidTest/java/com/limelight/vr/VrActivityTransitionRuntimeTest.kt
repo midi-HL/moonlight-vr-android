@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -82,9 +84,17 @@ class VrActivityTransitionRuntimeTest {
                 assertNotNull("The real settings Activity must have been created", settings)
                 assertTrue("Opening settings must pause the original source Activity",
                     source?.let(::isResumed) == false)
-                lifecycle.events.add("${SystemClock.uptimeMillis()} finish StreamSettings")
-                settings!!.finish()
+                assertTrue("Settings must own the real focused input window before B",
+                    settings!!.window.decorView.hasWindowFocus())
+                lifecycle.events.add("${SystemClock.uptimeMillis()} inject system gamepad B")
             }
+            // Traverse InputDispatcher and the real Settings Window.Callback. Calling finish()
+            // directly would miss the global VR Back callback that caused the user regression.
+            val backTime = SystemClock.uptimeMillis()
+            val back = KeyEvent(backTime, backTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B,
+                0, 0, -1, 0, 0, InputDevice.SOURCE_GAMEPAD)
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(back, true))
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(KeyEvent.changeAction(back, KeyEvent.ACTION_UP), true))
             awaitStereoScene("activity-returned-vr", SOURCE_MARKER) {
                 source?.let(::isSettledVrActivity) == true
             }
@@ -101,6 +111,7 @@ class VrActivityTransitionRuntimeTest {
                         lifecycle.firstSettingsPreResumedOrientation ?: Int.MIN_VALUE)
                 }
                 assertTrue("The same PcView must resume after settings closes", lifecycle.sourceResumes >= 2)
+                assertTrue("A real B return must keep VR enabled", VrSession.enabled)
                 assertEquals("Settings must inflate in inherited landscape before creating its layout",
                     Configuration.ORIENTATION_LANDSCAPE, lifecycle.firstSettingsCreatedConfiguration)
                 assertEquals("Entering settings in VR must not force a portrait-layout recreation",
