@@ -22,7 +22,10 @@ object VrInputDispatcher {
 
     /** Cancel immediately at lifecycle/mode boundaries, before delayed focus notifications. */
     internal fun cancelNativeWindows(activity: Activity? = null) {
-        nativeWindows.entries.toList().forEach { (state, owner) ->
+        // Snapshot strong keys. A singleton entries.toList() can retain a weak Entry whose
+        // key is cleared during GC before cancellation reaches it.
+        nativeWindows.keys.toList().forEach { state ->
+            val owner = nativeWindows[state]
             if (activity == null || owner?.get() === activity) state.cancel()
         }
     }

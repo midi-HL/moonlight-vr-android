@@ -1,6 +1,7 @@
 package com.limelight.vr
 
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.app.Activity
@@ -9,18 +10,23 @@ import android.app.Dialog
 import android.os.Bundle
 import android.os.SystemClock
 import android.graphics.Canvas
+import android.util.Log
 import android.view.KeyEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.limelight.PcView
 import com.limelight.R
 import com.limelight.preferences.StreamSettings
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -108,71 +114,187 @@ class VrTransitionLifecycleRuntimeTest {
         }
     }
 
-    @Test fun normal2dSettingsRestoreAutomaticRotationAfterAPortraitSource() = verify2dSettingsRotation(false)
+    @Test fun normal2dSettingsRestoreAutomaticRotationAfterAPortraitSource() = verify2dSettingsAgainstDefaultPolicy(false)
 
-    @Test fun fixedLandscape2dSourceDoesNotLockSettingsOrientation() = verify2dSettingsRotation(true)
+    @Test fun fixedLandscape2dSourceDoesNotLockSettingsOrientation() = verify2dSettingsAgainstDefaultPolicy(true)
 
-    private fun verify2dSettingsRotation(landscapeSource: Boolean) {
+    private fun verify2dSettingsAgainstDefaultPolicy(landscapeSource: Boolean) {
         val original = VrSession.settings
         val application = context.applicationContext as Application
+        val sourceOrientation = if (landscapeSource) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
+        val sourceRequest = if (landscapeSource) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        val direction = if (landscapeSource) "landscape" else "portrait"
+        val directory = File(context.getExternalFilesDir(null) ?: context.filesDir, "vr-review").apply { mkdirs() }
+        val traceFile = File(directory, "2d-default-policy-$direction.txt")
+        val trace = ArrayList<String>()
+        val stages = HashMap<Activity, String>()
+        val controlInstances = ArrayList<ComponentActivity>()
+        val targetInstances = ArrayList<StreamSettings>()
+        var source: PcView? = null
+        var control: ComponentActivity? = null
         var target: StreamSettings? = null
-        var targetResumed = false
+        var controlOrientation = Configuration.ORIENTATION_UNDEFINED
+        var currentStage = "setup"
+        fun identity(activity: Activity?): String = activity?.let {
+            "${it.javaClass.name}@${Integer.toHexString(System.identityHashCode(it))}/task=${it.taskId}"
+        } ?: "none"
+        fun isResumed(activity: Activity): Boolean = ActivityLifecycleMonitorRegistry.getInstance()
+            .getActivitiesInStage(Stage.RESUMED).any { it === activity }
+        @Suppress("DEPRECATION")
+        fun describe(label: String, activity: Activity?): String {
+            if (activity == null) return "$label=none"
+            val decor = activity.window.decorView
+            return "$label=${identity(activity)} lifecycle=${stages[activity]}" +
+                " req=${activity.requestedOrientation} cfg=${activity.resources.configuration.orientation}" +
+                " rotation=${activity.windowManager.defaultDisplay.rotation} bounds=${decor.width}x${decor.height}" +
+                " attached=${decor.isAttachedToWindow} laidOut=${decor.isLaidOut} layoutPending=${decor.isLayoutRequested}" +
+                " focus=${decor.hasWindowFocus()} resumed=${isResumed(activity)} owner=${VrSession.isInputOwnerResumed(activity)}" +
+                " finishing=${activity.isFinishing} destroyed=${activity.isDestroyed}"
+        }
+        fun snapshot(): String = "vr=${VrSession.enabled} expectedControlCfg=$controlOrientation " +
+            describe("source", source) + " | " + describe("control", control) + " | " + describe("target", target)
+        fun record(event: String, state: String = snapshot()) {
+            val entry = "${SystemClock.uptimeMillis()} [$direction/$currentStage] $event $state"
+            trace.add(entry)
+            Log.i("Vr2dPolicyTest", entry)
+        }
+        fun settled(activity: Activity?): Boolean {
+            if (activity == null || activity.isFinishing || activity.isDestroyed || !isResumed(activity) ||
+                !VrSession.isInputOwnerResumed(activity)) return false
+            val decor = activity.window.decorView
+            val configuration = activity.resources.configuration.orientation
+            return decor.isAttachedToWindow && decor.isLaidOut && !decor.isLayoutRequested && decor.hasWindowFocus() &&
+                decor.width > 0 && decor.height > 0 && decor.width != decor.height &&
+                configuration == if (decor.width > decor.height) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
+        }
+        fun awaitPolicy(label: String, diagnostics: () -> String, condition: () -> Boolean) {
+            currentStage = label
+            val deadline = SystemClock.uptimeMillis() + 20000L
+            var lastState = ""
+            while (SystemClock.uptimeMillis() < deadline) {
+                var ready = false
+                instrumentation.runOnMainSync {
+                    val state = diagnostics() + " | " + snapshot()
+                    if (state != lastState) { record("waiting", state); lastState = state }
+                    ready = condition()
+                    if (ready) record("ready", state)
+                }
+                if (ready) return
+                SystemClock.sleep(40L)
+            }
+            throw AssertionError("2D default-policy stage '$label' timed out; $lastState; trace=${traceFile.absolutePath}")
+        }
         val observer = object : Application.ActivityLifecycleCallbacks {
+            private fun changed(activity: Activity, stage: String) {
+                if (activity !is PcView && activity !is StreamSettings && activity.javaClass != ComponentActivity::class.java) return
+                stages[activity] = stage
+                record("lifecycle=$stage eventActivity=${identity(activity)}")
+            }
+            override fun onActivityPreCreated(activity: Activity, state: Bundle?) = changed(activity, "preCreated")
             override fun onActivityCreated(activity: Activity, state: Bundle?) {
-                if (activity is StreamSettings) { target = activity; targetResumed = false }
+                if (activity.javaClass == ComponentActivity::class.java) {
+                    val createdControl = activity as ComponentActivity
+                    control = createdControl
+                    controlInstances.add(createdControl)
+                    // The library's debug Activity has an original UNSPECIFIED manifest entry.
+                    // Give it plain measurable content without changing its orientation policy.
+                    createdControl.setContentView(View(createdControl))
+                }
+                if (activity is StreamSettings) { target = activity; targetInstances.add(activity) }
+                changed(activity, "created")
             }
-            override fun onActivityResumed(activity: Activity) {
-                if (activity === target) targetResumed = true
-            }
-            override fun onActivityStarted(activity: Activity) = Unit
-            override fun onActivityPaused(activity: Activity) = Unit
-            override fun onActivityStopped(activity: Activity) = Unit
-            override fun onActivityDestroyed(activity: Activity) = Unit
+            override fun onActivityResumed(activity: Activity) = changed(activity, "resumed")
+            override fun onActivityStarted(activity: Activity) = changed(activity, "started")
+            override fun onActivityPaused(activity: Activity) = changed(activity, "paused")
+            override fun onActivityStopped(activity: Activity) = changed(activity, "stopped")
+            override fun onActivityDestroyed(activity: Activity) = changed(activity, "destroyed")
             override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
         }
+        var scenario: ActivityScenario<PcView>? = null
         instrumentation.runOnMainSync {
             VrSession.setEnabled(context, false)
             application.registerActivityLifecycleCallbacks(observer)
+            record("observer registered")
         }
-        val scenario = ActivityScenario.launch<PcView>(
-            Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {
-            var source: PcView? = null
-            var automaticOrientation = Configuration.ORIENTATION_UNDEFINED
-            scenario.onActivity {
-                source = it
-                it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            val launched = ActivityScenario.launch<PcView>(
+                Intent(context, PcView::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            scenario = launched
+            launched.onActivity { activity ->
+                source = activity
+                currentStage = "fix-source"
+                activity.requestedOrientation = sourceRequest
+                record("requested fixed source orientation")
             }
-            awaitMain {
-                val owner = requireNotNull(source)
-                val decor = owner.window.decorView
-                decor.isLaidOut && decor.width > 0 && decor.height > 0 &&
-                    owner.resources.configuration.orientation == if (decor.width > decor.height)
-                        Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
+            awaitPolicy("fixed-source-before-control", {
+                "settled=${settled(source)} fixedRequest=${source?.requestedOrientation == sourceRequest}" +
+                    " fixedConfig=${source?.resources?.configuration?.orientation == sourceOrientation}"
+            }) { settled(source) && source?.requestedOrientation == sourceRequest &&
+                source?.resources?.configuration?.orientation == sourceOrientation }
+            launched.onActivity { activity ->
+                @Suppress("DEPRECATION")
+                val info = context.packageManager.getActivityInfo(ComponentName(context, ComponentActivity::class.java), 0)
+                assertEquals("Control must use its original default orientation policy",
+                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, info.screenOrientation)
+                currentStage = "launch-control"
+                record("launching original UNSPECIFIED control from fixed source")
+                activity.startActivity(Intent(activity, ComponentActivity::class.java))
             }
-            scenario.onActivity {
-                automaticOrientation = it.resources.configuration.orientation
-                it.requestedOrientation = if (landscapeSource) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                    else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            awaitPolicy("control-default-policy", {
+                "settled=${settled(control)} defaultRequest=${control?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}"
+            }) { settled(control) && control?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+            instrumentation.runOnMainSync {
+                val actualControl = requireNotNull(control)
+                assertEquals("Control and Settings must share the fixed source's task context",
+                    requireNotNull(source).taskId, actualControl.taskId)
+                controlOrientation = actualControl.resources.configuration.orientation
+                record("recorded independent default-policy orientation=$controlOrientation")
+                actualControl.finish()
             }
-            val sourceOrientation = if (landscapeSource) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
-            awaitMain { source?.resources?.configuration?.orientation == sourceOrientation }
-            scenario.onActivity { it.startActivity(Intent(it, StreamSettings::class.java)) }
-            awaitMain { targetResumed && target?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED &&
-                target?.resources?.configuration?.orientation == automaticOrientation }
+            awaitPolicy("same-fixed-source-after-control", {
+                "settled=${settled(source)} fixedRequest=${source?.requestedOrientation == sourceRequest}" +
+                    " fixedConfig=${source?.resources?.configuration?.orientation == sourceOrientation}"
+            }) { settled(source) && source?.requestedOrientation == sourceRequest &&
+                source?.resources?.configuration?.orientation == sourceOrientation }
+            launched.onActivity { activity ->
+                assertSame("Both destination launches must use the same source Activity", source, activity)
+                currentStage = "launch-settings"
+                record("launching Settings from the same fixed source")
+                activity.startActivity(Intent(activity, StreamSettings::class.java))
+            }
+            awaitPolicy("settings-matches-independent-control", {
+                "resumed=${target?.let(::isResumed)} settled=${settled(target)}" +
+                    " defaultRequest=${target?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED}" +
+                    " matchesControl=${target?.resources?.configuration?.orientation == controlOrientation}"
+            }) { settled(target) && target?.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED &&
+                target?.resources?.configuration?.orientation == controlOrientation }
             instrumentation.runOnMainSync {
                 assertFalse(VrSession.enabled)
+                assertEquals(requireNotNull(source).taskId, requireNotNull(target).taskId)
                 assertEquals(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, requireNotNull(target).requestedOrientation)
-                assertEquals(automaticOrientation, requireNotNull(target).resources.configuration.orientation)
+                assertEquals("Settings must resolve orientation like the original UNSPECIFIED control in this task",
+                    controlOrientation, requireNotNull(target).resources.configuration.orientation)
                 assertEquals(0, countTheaters(requireNotNull(target).window.decorView))
+                record("all default-policy assertions passed")
             }
         } finally {
-            instrumentation.runOnMainSync {
-                target?.finish()
-                application.unregisterActivityLifecycleCallbacks(observer)
+            try {
+                instrumentation.runOnMainSync {
+                    currentStage = "cleanup"
+                    record("finishing control/Settings instances")
+                    (targetInstances + controlInstances).forEach { if (!it.isDestroyed && !it.isFinishing) it.finish() }
+                    application.unregisterActivityLifecycleCallbacks(observer)
+                }
+            } finally {
+                try { scenario?.close() } finally {
+                    instrumentation.runOnMainSync {
+                        VrSession.updateSettings(context, original)
+                        record("original VR settings restored")
+                    }
+                    traceFile.writeText(trace.joinToString("\n", postfix = "\n"))
+                }
             }
-            scenario.close()
-            instrumentation.runOnMainSync { VrSession.updateSettings(context, original) }
         }
     }
 

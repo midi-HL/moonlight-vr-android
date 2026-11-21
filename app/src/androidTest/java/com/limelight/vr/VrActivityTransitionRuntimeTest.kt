@@ -237,6 +237,10 @@ class VrActivityTransitionRuntimeTest {
                 try {
                     var left = 0
                     var right = 0
+                    var leftX = 0L
+                    var rightX = 0L
+                    var leftY = 0L
+                    var rightY = 0L
                     for (y in 0 until frame.height step 2) for (x in 0 until frame.width step 2) {
                         val pixel = frame.getPixel(x, y)
                         val matches = if (markerColor == SOURCE_MARKER) {
@@ -244,9 +248,25 @@ class VrActivityTransitionRuntimeTest {
                         } else {
                             Color.red(pixel) in 100..155 && Color.green(pixel) > 210 && Color.blue(pixel) < 60
                         }
-                        if (matches) { if (x < frame.width / 2) left++ else right++ }
+                        if (matches) {
+                            if (x < frame.width / 2) { left++; leftX += x; leftY += y }
+                            else { right++; rightX += x; rightY += y }
+                        }
                     }
-                    val visible = activityReady && frame.width > frame.height && left > 12 && right > 12
+                    val lx = leftX.toDouble() / maxOf(1, left)
+                    val rx = rightX.toDouble() / maxOf(1, right)
+                    val ly = leftY.toDouble() / maxOf(1, left)
+                    val ry = rightY.toDouble() / maxOf(1, right)
+                    // One ordinary marker crossing the midpoint can fill both half-counters.
+                    // Only two separated eye copies establish that GL stereo is really visible.
+                    val separated = rx - lx > frame.width * 0.25 &&
+                        kotlin.math.abs(lx / frame.width - 0.25) < 0.18 &&
+                        kotlin.math.abs(rx / frame.width - 0.75) < 0.18 &&
+                        kotlin.math.abs(ly / frame.height - 0.5) < 0.25 &&
+                        kotlin.math.abs(ry / frame.height - 0.5) < 0.25
+                    val visible = activityReady && frame.width > frame.height && left > 12 && right > 12 && separated
+                    frames.add("sceneCentroids " + name + " left=" + lx + "," + ly +
+                        " right=" + rx + "," + ry + " separated=" + separated)
                     frames.add("${SystemClock.uptimeMillis()} $name frame=$attempt ready=$activityReady" +
                         " size=${frame.width}x${frame.height} markerLeft=$left markerRight=$right visible=$visible")
                     if (attempt < 12) {

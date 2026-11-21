@@ -55,14 +55,48 @@ class VrNativeInputBoundaryRuntimeTest {
         instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
         val scenario = ActivityScenario.launch<HelpActivity>(Intent(context, HelpActivity::class.java)
             .setData(Uri.parse("about:blank")))
+        lateinit var owner: HelpActivity
+        fun awaitMain(message: String, stableMs: Long = 0L, condition: () -> Boolean) {
+            val deadline = SystemClock.uptimeMillis() + 15_000L
+            var readySince = 0L
+            while (SystemClock.uptimeMillis() < deadline) {
+                var ready = false
+                instrumentation.runOnMainSync { ready = condition() }
+                val now = SystemClock.uptimeMillis()
+                if (ready) {
+                    if (readySince == 0L) readySince = now
+                    if (now - readySince >= stableMs) return
+                } else readySince = 0L
+                SystemClock.sleep(25L)
+            }
+            throw AssertionError(message)
+        }
         try {
             scenario.onActivity { activity ->
+                owner = activity
                 activity.setContentView(Button(activity).apply { isFocusableInTouchMode = true; requestFocus() })
                 VrSession.setEnabled(activity, true)
-                val now = SystemClock.uptimeMillis()
-                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B))
-                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B))
-                assertTrue("Plain Activity back must run, rather than a synthetic BACK key swallowed by API 33+", activity.isFinishing)
+            }
+            // about:blank still creates a loading dialog. Inject through the real focused
+            // window only after it has gone and the asynchronous landscape change settles.
+            awaitMain("Help never became the focused landscape VR window", stableMs = 250L) {
+                owner.window.decorView.hasWindowFocus() && owner.window.decorView.isLaidOut &&
+                    owner.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+                    VrSession.isInputOwnerResumed(owner)
+            }
+            val downTime = SystemClock.uptimeMillis()
+            for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                val event = KeyEvent(downTime, SystemClock.uptimeMillis(), action,
+                    KeyEvent.KEYCODE_BUTTON_B, 0, 0, -1, 0, 0, InputDevice.SOURCE_GAMEPAD)
+                assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+            }
+            // API 35 ActivityClient requests finish through a posted callback; waiting on
+            // the instrumentation thread lets that callback run on the Activity main loop.
+            awaitMain("Plain Activity back must run, rather than a synthetic BACK key swallowed by API 33+") {
+                owner.isFinishing || owner.isDestroyed
+            }
+            instrumentation.runOnMainSync {
+                assertTrue(owner.isFinishing || owner.isDestroyed)
                 assertTrue(VrSession.enabled)
             }
         } finally {
