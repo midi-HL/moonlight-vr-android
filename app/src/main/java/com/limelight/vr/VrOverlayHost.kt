@@ -35,7 +35,8 @@ class VrOverlayHost(
     // This ordinary hardware layer covers the 2D decor while the window rotates or GL starts.
     // Software window capture deliberately skips it, just as it skips the Cardboard SurfaceView.
     private val curtain = object : View(activity) {
-        override fun draw(canvas: Canvas) {
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
             if (canvas.isHardwareAccelerated) canvas.drawColor(Color.BLACK)
         }
     }

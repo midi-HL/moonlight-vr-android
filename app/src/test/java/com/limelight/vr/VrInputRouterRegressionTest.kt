@@ -7,6 +7,58 @@ import org.junit.Test
 
 class VrInputRouterRegressionTest {
     @Test
+    fun focusCancellationKeepsHostReleaseAcrossPanelOpenButStopsOldChords() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_A,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1001L))
+        router.cancelWindowInput()
+        assertNull(router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_SELECT,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1002L))
+        assertNull(router.onMenuHoldElapsed())
+        router.panelOpen = true
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_A,
+            VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1001L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_A,
+            VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1000L))
+    }
+
+    @Test
+    fun canceledUiChordIsOnlyAReleaseTombstoneAndFreshOtherControllerCanOpenMenu() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(VrKeys.BUTTON_SELECT,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1001L))
+        router.cancelWindowInput()
+        assertNull(router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_DOWN, true, deviceId = 1, isRepeat = true, captureUiMenuKeys = true, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_DOWN, true, deviceId = 2, captureUiMenuKeys = true, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(VrKeys.BUTTON_SELECT,
+            VrKeys.ACTION_DOWN, true, deviceId = 2, captureUiMenuKeys = true, downTime = 1101L))
+        assertEquals(VrGamepadRouter.Command.TogglePanel, router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(VrKeys.BUTTON_START,
+            VrKeys.ACTION_UP, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1000L))
+    }
+
+    @Test
+    fun fullLifecycleResetDropsFocusReleaseOwnership() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN, true, downTime = 1000L)
+        router.cancelWindowInput()
+        router.reset()
+        router.panelOpen = true
+        assertEquals(VrGamepadRouter.Command.Consumed,
+            router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_UP, true, downTime = 1000L))
+    }
+
+    @Test
     fun panelRecoversFromMissingReleaseAndIgnoresLateReleaseOfTheOldPress() {
         val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
         assertEquals(VrGamepadRouter.Command.Confirm, router.onKey(VrKeys.BUTTON_A, VrKeys.ACTION_DOWN,

@@ -125,6 +125,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         router.deadZone = clean.gamepadDeadZone
         router.repeatMs = clean.menuRepeatMs
         if (wasEnabled && !enabled) {
+            VrInputDispatcher.cancelNativeWindows()
             setPanelOpen(false)
             restoreAllWindows()
         }
@@ -187,6 +188,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     fun setPanelOpen(value: Boolean) {
         if (panelOpen == value) return
+        VrInputDispatcher.cancelNativeWindows()
         panelOpen = value
         router.panelOpen = value
         editing = false
@@ -299,7 +301,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         val owner = dialog.ownerActivity ?: findActivity(dialog.context) ?: return
         val decor = window.decorView
         if (window.callback !is VrActivityHooks) {
-            window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true, inputWindow = window)
+            window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true,
+                inputWindow = window, backOwner = dialog)
         }
         registerFloatingWindow(owner, decor, window)
     }
@@ -599,15 +602,18 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     private fun cancelPendingInput() {
         onWindowInputCanceled()
+        router.reset()
         backOwnership.clear()
     }
 
     /** Focus may move to a native dialog without ending a host-owned BACK press. */
     internal fun onWindowInputCanceled() {
         cancelHold()
-        router.reset()
+        router.cancelWindowInput()
         tapCancelled = true
     }
+
+    internal fun isInputOwnerResumed(activity: Activity): Boolean = activeActivity === activity
 
     // ---- ActivityLifecycleCallbacks: attach an overlay to every screen ----
 
@@ -666,6 +672,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityPaused(activity: Activity) {
+        VrInputDispatcher.cancelNativeWindows(activity)
         if (activeActivity === activity) {
             cancelPendingInput()
             activeHost?.pause()

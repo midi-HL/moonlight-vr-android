@@ -714,6 +714,8 @@ class PcView : ThemedActivity(), AdapterFragmentCallbacks, ShakeDetector.Listene
         val menu = object : LinearLayout(this) {
             private val vrInputState = com.limelight.vr.VrInputDispatcher.WindowState(
                 this@PcView.getSystemService(android.content.Context.INPUT_SERVICE) as? android.hardware.input.InputManager,
+                owner = this@PcView,
+                invokeBack = { popup.dismiss() },
             ) { findFocus() }
 
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {

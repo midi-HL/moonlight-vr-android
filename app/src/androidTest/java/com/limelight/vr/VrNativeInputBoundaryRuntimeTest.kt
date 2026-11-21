@@ -1,6 +1,7 @@
 package com.limelight.vr
 
 import android.content.Intent
+import android.app.AlertDialog
 import android.net.Uri
 import android.os.SystemClock
 import android.view.InputDevice
@@ -8,6 +9,8 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -20,6 +23,161 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class VrNativeInputBoundaryRuntimeTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+
+    @Test fun unhandledBInvokesTheRealComponentActivityBackDispatcherOnce() {
+        val context = instrumentation.targetContext
+        val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
+        val scenario = ActivityScenario.launch<ComponentActivity>(Intent(context, ComponentActivity::class.java))
+        try {
+            scenario.onActivity { activity ->
+                var backs = 0
+                activity.onBackPressedDispatcher.addCallback(activity, object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() { backs++ }
+                })
+                activity.setContentView(Button(activity).apply { isFocusableInTouchMode = true; requestFocus() })
+                VrSession.setEnabled(activity, true)
+                val now = SystemClock.uptimeMillis()
+                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B))
+                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B))
+                assertEquals("B must use the Activity's back dispatcher on predictive-back Android too", 1, backs)
+                assertTrue(VrSession.enabled)
+            }
+        } finally {
+            instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
+            scenario.close()
+        }
+    }
+
+    @Test fun unhandledBFinishesRealHelpActivityWithoutDisablingVr() {
+        val context = instrumentation.targetContext
+        val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
+        val scenario = ActivityScenario.launch<HelpActivity>(Intent(context, HelpActivity::class.java)
+            .setData(Uri.parse("about:blank")))
+        try {
+            scenario.onActivity { activity ->
+                activity.setContentView(Button(activity).apply { isFocusableInTouchMode = true; requestFocus() })
+                VrSession.setEnabled(activity, true)
+                val now = SystemClock.uptimeMillis()
+                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B))
+                activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B))
+                assertTrue("Plain Activity back must run, rather than a synthetic BACK key swallowed by API 33+", activity.isFinishing)
+                assertTrue(VrSession.enabled)
+            }
+        } finally {
+            instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
+            scenario.close()
+        }
+    }
+
+    @Test fun panelModeChangeCancelsNativeLongPressAndItsLaterConfirmation() {
+        var clicks = 0
+        var longClicks = 0
+        withWindowAcrossWaits { scenario ->
+            val downAt = SystemClock.uptimeMillis()
+            scenario.onActivity { activity ->
+                focusedButton(activity).apply {
+                    setOnClickListener { clicks++ }
+                    setOnLongClickListener { longClicks++; true }
+                }
+                activity.window.callback.dispatchKeyEvent(key(downAt, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+                VrSession.setPanelOpen(true)
+            }
+            SystemClock.sleep(1100L)
+            scenario.onActivity { activity ->
+                VrSession.setPanelOpen(false)
+                activity.window.callback.dispatchKeyEvent(key(downAt, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+                assertEquals(0, longClicks)
+                assertEquals(0, clicks)
+                assertFalse(focusedButton(activity).isPressed)
+            }
+        }
+    }
+
+    @Test fun canceledNativeReleaseStaysCanceledAcrossNewWindowAndVrDisable() = withWindow { activity, button ->
+        var confirmations = 0
+        button.setOnKeyListener { _, code, event ->
+            if (code == KeyEvent.KEYCODE_BUTTON_A) {
+                if (event.action == KeyEvent.ACTION_UP) confirmations++
+                true
+            } else false
+        }
+        val now = SystemClock.uptimeMillis()
+        activity.window.callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        VrSession.setEnabled(activity, false)
+        val successor = VrActivityHooks(activity, activity)
+        successor.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals("The old UP must not activate a different window after exiting VR", 0, confirmations)
+        successor.dispatchKeyEvent(key(now + 1, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_A))
+        successor.dispatchKeyEvent(key(now + 1, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals("A fresh 2D press still works normally", 1, confirmations)
+    }
+
+    @Test fun shortPauseResumeCancelsHeldAxesBeforeAnyFocusNotification() {
+        var moves = 0
+        withWindowAcrossWaits { scenario ->
+            scenario.onActivity { activity ->
+                focusedButton(activity).setOnKeyListener { _, code, event ->
+                    if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (event.action == KeyEvent.ACTION_DOWN) moves++
+                        true
+                    } else false
+                }
+                val event = axis(0.8f)
+                try { activity.window.callback.dispatchGenericMotionEvent(event) }
+                finally { event.recycle() }
+                assertEquals(1, moves)
+                VrSession.onActivityPaused(activity)
+                VrSession.onActivityResumed(activity)
+            }
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 3 + 100)
+            scenario.onActivity { assertEquals("Even a pause shorter than one repeat cancels the old hold", 1, moves) }
+        }
+    }
+
+    @Test fun projectedDialogKeepsAxisOwnershipWhileItsActivityWindowIsUnfocused() {
+        var moves = 0
+        var dialog: AlertDialog? = null
+        withWindowAcrossWaits { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    val button = Button(activity).apply {
+                        isFocusableInTouchMode = true
+                        setOnKeyListener { _, code, event ->
+                            if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                if (event.action == KeyEvent.ACTION_DOWN) moves++
+                                true
+                            } else false
+                        }
+                    }
+                    dialog = AlertDialog.Builder(activity).setView(button).create().also {
+                        it.show()
+                        button.requestFocus()
+                        VrSession.registerDialog(it)
+                    }
+                }
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { activity ->
+                    assertFalse("The real dialog must own window focus", activity.window.decorView.hasWindowFocus())
+                    val event = axis(0f, hatY = 1f)
+                    try { requireNotNull(dialog).window!!.callback.dispatchGenericMotionEvent(event) }
+                    finally { event.recycle() }
+                }
+                SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 3 + 100)
+                scenario.onActivity { activity ->
+                    assertTrue("A dialog shares the resumed Activity owner; moves=$moves", moves >= 3)
+                    val now = SystemClock.uptimeMillis()
+                    val callback = requireNotNull(dialog).window!!.callback
+                    callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_B))
+                    callback.dispatchKeyEvent(key(now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_B))
+                    assertFalse("Unhandled B must dismiss the dialog itself", requireNotNull(dialog).isShowing)
+                    assertFalse(activity.isFinishing)
+                    assertTrue(VrSession.enabled)
+                }
+            } finally { instrumentation.runOnMainSync { dialog?.dismiss() } }
+        }
+    }
 
     @Test fun keyboardEscapeAndNativeBackKeepBalancedCancellationOwnership() = withWindow { activity, button ->
         var dismissals = 0
@@ -130,7 +288,7 @@ class VrNativeInputBoundaryRuntimeTest {
         assertTrue(VrSession.enabled)
     }
 
-    @Test fun nativeBUpOnlyActionPrecedesBackFallbackAndUnhandledBReturnsOnce() = withWindow { activity, button ->
+    @Test fun nativeBUpOnlyActionPrecedesBackFallback() = withWindow { activity, button ->
         var dismissals = 0
         var backs = 0
         var ownB = true
@@ -150,9 +308,6 @@ class VrNativeInputBoundaryRuntimeTest {
         pressB()
         assertEquals(1, dismissals)
         assertEquals(0, backs)
-        ownB = false
-        pressB()
-        assertEquals(1, backs)
         assertTrue(VrSession.enabled)
     }
 

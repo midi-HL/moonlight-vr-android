@@ -20,6 +20,7 @@ class VrGamepadRouter {
     private data class Button(val deviceId: Int, val keyCode: Int)
 
     private val pressed = HashSet<Button>()
+    private val forwardedReleases = HashSet<Button>()
     private val pressTimes = HashMap<Button, Long>()
     private val captured = HashSet<Button>()
     private var menuDevice: Int? = null
@@ -51,8 +52,16 @@ class VrGamepadRouter {
 
     fun reset() {
         pressed.clear()
+        forwardedReleases.clear()
         pressTimes.clear()
         captured.clear()
+        cancelWindowInput()
+    }
+
+    /** Lose gestures, but keep the release of every DOWN already sent to its original owner. */
+    fun cancelWindowInput() {
+        forwardedReleases.addAll(pressed.filterNot { it in captured })
+        pressed.clear()
         menuDevice = null
         menuHoldFired = false
         lastHatDirection = 0
@@ -93,6 +102,7 @@ class VrGamepadRouter {
                 return if (button in captured || (panelOpen && isGamepadSource)) Command.Consumed else Command.PassThrough
             }
             pressTimes.remove(button)
+            if (forwardedReleases.remove(button)) return Command.PassThrough
             val owned = captured.remove(button)
             val wasPressed = pressed.remove(button)
             if (menuDevice == deviceId && !menuHoldActive(deviceId)) {
@@ -111,6 +121,7 @@ class VrGamepadRouter {
             // A new physical press proves the previous UP was lost. Keep true OS repeats
             // suppressed, but let the user's next complete press recover immediately.
             pressed.remove(button)
+            forwardedReleases.remove(button)
             captured.remove(button)
             pressTimes.remove(button)
             if (menuDevice == deviceId && !menuHoldActive(deviceId)) {
@@ -118,6 +129,8 @@ class VrGamepadRouter {
                 menuHoldFired = false
             }
         }
+        if (button in forwardedReleases) return Command.PassThrough
+        if (button in captured && button !in pressed) return Command.Consumed
         val wasMenuActive = menuHoldActive(deviceId)
         val alreadyDown = button in pressed
         if (alreadyDown || isRepeat) {

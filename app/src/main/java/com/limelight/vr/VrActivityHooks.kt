@@ -1,6 +1,7 @@
 package com.limelight.vr
 
 import android.app.Activity
+import android.app.Dialog
 import android.hardware.input.InputManager
 import android.os.Build
 import android.view.ActionMode
@@ -14,6 +15,7 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import androidx.activity.OnBackPressedDispatcherOwner
 
 /**
  * A Window.Callback decorator that installs the VR input interceptor on every
@@ -25,10 +27,23 @@ class VrActivityHooks(
     private val delegate: Window.Callback,
     private val inDialog: Boolean = false,
     private val inputWindow: Window = activity.window,
+    private val backOwner: Any = delegate,
 ) : Window.Callback {
     private val inputState = VrInputDispatcher.WindowState(
         activity.getSystemService(android.content.Context.INPUT_SERVICE) as? InputManager,
+        owner = activity,
+        invokeBack = ::dispatchNativeBack,
     ) { inputWindow.decorView.findFocus() }
+
+    @Suppress("DEPRECATION")
+    private fun dispatchNativeBack() {
+        when {
+            backOwner is OnBackPressedDispatcherOwner -> backOwner.onBackPressedDispatcher.onBackPressed()
+            backOwner is Dialog -> backOwner.onBackPressed()
+            activity is OnBackPressedDispatcherOwner -> activity.onBackPressedDispatcher.onBackPressed()
+            else -> activity.onBackPressed()
+        }
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         return VrInputDispatcher.dispatchKey(activity, event, inDialog, inputState, delegate::dispatchKeyEvent)

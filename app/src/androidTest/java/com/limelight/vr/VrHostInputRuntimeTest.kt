@@ -324,7 +324,11 @@ class VrHostInputRuntimeTest {
                 }
                 val time = SystemClock.uptimeMillis()
                 button(KeyEvent.ACTION_DOWN, time, time)
+                // A focus change ends local gestures, but must not lose a host-owned release.
+                VrSession.onWindowInputCanceled()
+                VrSession.setPanelOpen(true)
                 button(KeyEvent.ACTION_UP, time + 40, time)
+                VrSession.setPanelOpen(false)
                 assertTrue("Controller must be declared before sending input", connection.controllerEvents.first() == "arrival")
                 val presses = connection.controllerPackets.toList()
                 assertTrue("A press must reach the host packet API", presses.any { it.buttons and ControllerPacket.A_FLAG != 0 })

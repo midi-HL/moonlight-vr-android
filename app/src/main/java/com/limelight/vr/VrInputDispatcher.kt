@@ -11,18 +11,40 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import com.limelight.Game
+import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 
 /** Routes input through the next Android Window.Callback without redispatching into its decor. */
 @SuppressLint("InlinedApi")
 object VrInputDispatcher {
+    private val nativeWindows = WeakHashMap<WindowState, WeakReference<Activity>?>()
+    private val canceledNativePresses = HashMap<Pair<Int, Int>, Long>()
+
+    /** Cancel immediately at lifecycle/mode boundaries, before delayed focus notifications. */
+    internal fun cancelNativeWindows(activity: Activity? = null) {
+        nativeWindows.entries.toList().forEach { (state, owner) ->
+            if (activity == null || owner?.get() === activity) state.cancel()
+        }
+    }
+
+    private fun consumeCanceledTail(event: KeyEvent): Boolean {
+        val button = event.deviceId to event.keyCode
+        if (canceledNativePresses[button] != event.downTime) return false
+        if (event.action == KeyEvent.ACTION_UP) canceledNativePresses.remove(button)
+        return true
+    }
+
     /** Input held by one actual Window must never continue in its successor. */
     class WindowState(
         private val inputManager: InputManager? = null,
+        owner: Activity? = null,
+        private val invokeBack: (() -> Unit)? = null,
         private val focusedView: () -> View? = { null },
     ) {
         private data class Button(val deviceId: Int, val keyCode: Int)
         private data class Press(val downTime: Long, var target: Int, val view: View?)
         private val presses = HashMap<Button, Press>()
+        init { nativeWindows[this] = owner?.let { WeakReference(it) } }
         private val handler = Handler(Looper.getMainLooper())
         private var focused = true
         private var axes: Axes? = null
@@ -94,9 +116,12 @@ object VrInputDispatcher {
                         clearNativePress(press)
                     } else {
                         if (press.target == KeyEvent.KEYCODE_BACK) {
-                            deliver(mapKey(KeyEvent.changeAction(event, KeyEvent.ACTION_DOWN), press.target))
+                            // API 33+ key dispatch does not invoke predictive-back callbacks.
+                            // Return through the actual Activity/Dialog navigation owner.
+                            invokeBack?.invoke()
+                        } else {
+                            deliver(mapKey(event, press.target))
                         }
-                        deliver(mapKey(event, press.target))
                     }
                     return true
                 }
@@ -159,6 +184,9 @@ object VrInputDispatcher {
 
         fun cancel() {
             cancelAxes()
+            presses.forEach { (button, press) ->
+                canceledNativePresses[button.deviceId to button.keyCode] = press.downTime
+            }
             presses.values.forEach(::clearNativePress)
             presses.clear()
         }
@@ -201,8 +229,9 @@ object VrInputDispatcher {
         val mouseBack = event.isFromSource(InputDevice.SOURCE_MOUSE) ||
             event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
         val backOwnedByHost = inDialog || (activity is Game && activity.connected && (controllerKey || mouseBack))
-        if (VrSession.onKeyEvent(event, controllerKey, backOwnedByHost,
-                captureUiMenuKeys = activity !is Game || inDialog)) return true
+        val capturedByVr = VrSession.onKeyEvent(event, controllerKey, backOwnedByHost,
+                captureUiMenuKeys = activity !is Game || inDialog)
+        if (consumeCanceledTail(event) || capturedByVr) return true
         val nativeBack = event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE
         if (!VrSession.enabled || (!controllerKey && !nativeBack) || (activity is Game && !inDialog)) return deliver(event)
 
@@ -270,7 +299,8 @@ object VrInputDispatcher {
         val axes = Axes(event.getAxisValue(VrKeys.AXIS_X), event.getAxisValue(VrKeys.AXIS_Y),
             event.getAxisValue(VrKeys.AXIS_HAT_X), event.getAxisValue(VrKeys.AXIS_HAT_Y),
             event.metaState, event.deviceId)
-        if (state != null) state.offerAxes(axes, { !activity.isFinishing && !activity.isDestroyed }) { held, at ->
+        if (state != null) state.offerAxes(axes, { !activity.isFinishing && !activity.isDestroyed &&
+            VrSession.isInputOwnerResumed(activity) }) { held, at ->
             dispatchAxes(held, at, deliverKey)
         } else dispatchAxes(axes, event.eventTime, deliverKey)
         // Neutral and throttled samples belong to the same navigator as deflection.
