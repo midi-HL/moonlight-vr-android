@@ -33,10 +33,17 @@ class KeyboardInputHandler(private val game: Game) {
     private val pressedKeys = HashSet<Int>()
     private data class ForwardedKey(val translated: Short, val flags: Byte)
     private val forwardedKeys = LinkedHashMap<Int, ForwardedKey>()
-    private var escState = 0 // 0 = 空闲，1 = ESC已按下，2 = 已进入组合键
+    // Several physical/custom presses can hold the same host key. Preserve its first DOWN.
+    private val forwardedHostKeys = LinkedHashMap<Short, ForwardedKey>()
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var escConfirmRunnable: Runnable
-    private var escTapRelease: Runnable? = null
+    private data class CustomButton(val deviceId: Int, val keyCode: Int)
+    private enum class CustomKind { PENDING_ESCAPE, ESCAPE, ESCAPE_TAP, COMBO_ESCAPE, FUNCTION, MENU }
+    private data class CustomPress(
+        val downTime: Long, var kind: CustomKind, var forwarded: ForwardedKey? = null,
+        var pending: Runnable? = null,
+    )
+    private val customPresses = LinkedHashMap<CustomButton, CustomPress>()
+    private val customPressTails = HashMap<CustomButton, Long>()
 
     private val toggleGrab = Runnable { game.setInputGrabState(!game.grabbedInput) }
 
@@ -133,16 +140,15 @@ class KeyboardInputHandler(private val game: Game) {
     }
 
     fun releaseForwardedKeys() {
-        if (::escConfirmRunnable.isInitialized) {
-            handler.removeCallbacks(escConfirmRunnable)
+        customPresses.toList().forEach { (button, press) ->
+            press.forwarded = null
+            cancelCustomPress(button, press)
         }
-        escTapRelease?.let { handler.removeCallbacks(it) }
-        escTapRelease = null
-        escState = 0
         specialKeyCode = KeyEvent.KEYCODE_UNKNOWN
         waitingForAllModifiersUp = false
-        val keys = forwardedKeys.values.toList()
+        val keys = forwardedHostKeys.values.toList()
         forwardedKeys.clear()
+        forwardedHostKeys.clear()
         for (key in keys) {
             game.conn?.sendKeyboardInput(
                 key.translated, KeyboardPacket.KEY_UP, getModifierState(), key.flags
@@ -152,13 +158,131 @@ class KeyboardInputHandler(private val game: Game) {
     }
 
     private fun sendKeyDown(trackingKey: Int, translated: Short, modifier: Byte, flags: Byte) {
-        forwardedKeys[trackingKey] = ForwardedKey(translated, flags)
-        game.conn?.sendKeyboardInput(translated, KeyboardPacket.KEY_DOWN, modifier, flags)
+        val key = ForwardedKey(translated, flags)
+        forwardedKeys[trackingKey] = key
+        forwardHostDown(key, modifier)
     }
 
     private fun sendTrackedKeyUp(trackingKey: Int, translated: Short, modifier: Byte, flags: Byte) {
-        forwardedKeys.remove(trackingKey)
-        game.conn?.sendKeyboardInput(translated, KeyboardPacket.KEY_UP, modifier, flags)
+        val key = forwardedKeys.remove(trackingKey) ?: ForwardedKey(translated, flags)
+        releaseHostIfUnheld(key.translated, modifier)
+    }
+
+    private fun forwardHostDown(key: ForwardedKey, modifier: Byte) {
+        if (forwardedHostKeys.containsKey(key.translated)) return
+        forwardedHostKeys[key.translated] = key
+        game.conn?.sendKeyboardInput(key.translated, KeyboardPacket.KEY_DOWN, modifier, key.flags)
+    }
+
+    private fun releaseHostIfUnheld(translated: Short, modifier: Byte) {
+        if (forwardedKeys.values.any { it.translated == translated } ||
+            customPresses.values.any { it.forwarded?.translated == translated }) return
+        val key = forwardedHostKeys.remove(translated) ?: return
+        game.conn?.sendKeyboardInput(key.translated, KeyboardPacket.KEY_UP, modifier, key.flags)
+    }
+
+    private fun forwardCustomDown(press: CustomPress, keyCode: Int, deviceId: Int) {
+        val key = ForwardedKey(keyboardTranslator.translate(keyCode, deviceId), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
+        press.forwarded = key
+        forwardHostDown(key, 0.toByte())
+    }
+
+    private fun releaseCustomForwarded(press: CustomPress) {
+        val key = press.forwarded ?: return
+        press.forwarded = null
+        releaseHostIfUnheld(key.translated, 0.toByte())
+    }
+
+    private fun cancelCustomPress(button: CustomButton, press: CustomPress) {
+        press.pending?.let(handler::removeCallbacks)
+        releaseCustomForwarded(press)
+        customPresses.remove(button)
+        rememberCustomTail(button, press.downTime)
+    }
+
+    private fun rememberCustomTail(button: CustomButton, downTime: Long) {
+        customPressTails[button] = maxOf(customPressTails[button] ?: Long.MIN_VALUE, downTime)
+    }
+
+    private fun isCustomTail(button: CustomButton, downTime: Long): Boolean {
+        return customPressTails[button]?.let { downTime <= it } == true
+    }
+
+    /** The physical DOWN owns its mapping even after ESC, focus, or settings change. */
+    private fun handleCustomKeyDown(event: KeyEvent): Boolean {
+        val button = CustomButton(event.deviceId, event.keyCode)
+        if (isCustomTail(button, event.downTime)) return true
+        customPresses[button]?.let { previous ->
+            if (previous.downTime == event.downTime || event.repeatCount > 0) return true
+            cancelCustomPress(button, previous)
+        }
+        if (!game.prefConfig.enableCustomKeyMap) return false
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.isCanceled || event.repeatCount > 0) return true
+            val press = CustomPress(event.downTime, CustomKind.PENDING_ESCAPE)
+            customPresses[button] = press
+            val pending = Runnable {
+                if (customPresses[button] !== press || press.kind != CustomKind.PENDING_ESCAPE) return@Runnable
+                press.pending = null
+                press.kind = CustomKind.ESCAPE
+                forwardCustomDown(press, KeyEvent.KEYCODE_ESCAPE, button.deviceId)
+            }
+            press.pending = pending
+            handler.postDelayed(pending, 200)
+            return true
+        }
+        val escape = customPresses[CustomButton(event.deviceId, KeyEvent.KEYCODE_ESCAPE)]
+            ?.takeIf { it.kind == CustomKind.PENDING_ESCAPE } ?: return false
+        if (event.isCanceled || event.repeatCount > 0) return true
+        escape.pending?.let(handler::removeCallbacks)
+        escape.pending = null
+        val mapped = when (event.keyCode) {
+            in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> KeyEvent.KEYCODE_F1 + event.keyCode - KeyEvent.KEYCODE_1
+            KeyEvent.KEYCODE_0 -> KeyEvent.KEYCODE_F10
+            KeyEvent.KEYCODE_MINUS -> KeyEvent.KEYCODE_F11
+            KeyEvent.KEYCODE_EQUALS -> KeyEvent.KEYCODE_F12
+            else -> null
+        }
+        if (mapped != null || event.keyCode == KeyEvent.KEYCODE_Q) {
+            escape.kind = CustomKind.COMBO_ESCAPE
+            val press = CustomPress(event.downTime, if (mapped == null) CustomKind.MENU else CustomKind.FUNCTION)
+            customPresses[button] = press
+            if (mapped != null) forwardCustomDown(press, mapped, event.deviceId)
+            return true
+        }
+        escape.kind = CustomKind.ESCAPE
+        forwardCustomDown(escape, KeyEvent.KEYCODE_ESCAPE, event.deviceId)
+        return false
+    }
+
+    private fun handleCustomKeyUp(event: KeyEvent, cancel: Boolean = event.isCanceled): Boolean {
+        val button = CustomButton(event.deviceId, event.keyCode)
+        if (isCustomTail(button, event.downTime)) return true
+        val press = customPresses[button]
+            ?: return game.prefConfig.enableCustomKeyMap && event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
+                !forwardedKeys.containsKey(KeyEvent.KEYCODE_ESCAPE)
+        // A late UP must not release a newer press of the same physical key.
+        if (press.downTime != event.downTime) return true
+        press.pending?.let(handler::removeCallbacks)
+        press.pending = null
+        if (!cancel && press.kind == CustomKind.PENDING_ESCAPE) {
+            press.kind = CustomKind.ESCAPE_TAP
+            forwardCustomDown(press, KeyEvent.KEYCODE_ESCAPE, event.deviceId)
+            val release = Runnable {
+                if (customPresses[button] !== press) return@Runnable
+                releaseCustomForwarded(press)
+                customPresses.remove(button)
+                rememberCustomTail(button, press.downTime)
+            }
+            press.pending = release
+            handler.postDelayed(release, 50)
+        } else {
+            customPresses.remove(button)
+            rememberCustomTail(button, press.downTime)
+            releaseCustomForwarded(press)
+            if (!cancel && press.kind == CustomKind.MENU) game.onBackPressed()
+        }
+        return true
     }
 
     private fun accessibilityOwnsWindowCopy(event: KeyEvent): Boolean {
@@ -184,65 +308,10 @@ class KeyboardInputHandler(private val game: Game) {
     fun handleKeyDown(event: KeyEvent): Boolean {
         if (accessibilityOwnsWindowCopy(event)) return true
 
-        // 自定义组合键，只能其它+esc，esc+其它时，esc抬起时其它才会down
+        // Custom ESC shortcuts keep the physical press's selected host mapping through UP.
         val keyCode = event.keyCode
         pressedKeys.add(keyCode)
-        if (game.prefConfig.enableCustomKeyMap) {
-            if (keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                escState = 1
-                escConfirmRunnable = Runnable {
-                    if (escState == 1) {
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_ESCAPE, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_ESCAPE, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        escState = 0
-                    }
-                }
-                handler.postDelayed(escConfirmRunnable, 200)
-                return true
-            }
-
-            if (escState == 1) {
-                handler.removeCallbacks(escConfirmRunnable)
-
-                when (keyCode) {
-                    KeyEvent.KEYCODE_Q -> {
-                        escState = 2
-                        return true
-                    }
-                    in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> {
-                        escState = 2
-                        val fKeyCode = KeyEvent.KEYCODE_F1 + (keyCode - KeyEvent.KEYCODE_1)
-                        val translated = keyboardTranslator.translate(fKeyCode, event.deviceId)
-                        sendKeyDown(fKeyCode, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        return true
-                    }
-                    KeyEvent.KEYCODE_0 -> {
-                        escState = 2
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F10, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_F10, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        return true
-                    }
-                    KeyEvent.KEYCODE_MINUS -> {
-                        escState = 2
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F11, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_F11, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        return true
-                    }
-                    KeyEvent.KEYCODE_EQUALS -> {
-                        escState = 2
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F12, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_F12, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        return true
-                    }
-                    else -> {
-                        // 非自定义组合键，不做处理
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_ESCAPE, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_ESCAPE, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        escState = 0
-                    }
-                }
-            }
-        }
+        if (handleCustomKeyDown(event)) return true
 
         // Pass-through virtual navigation keys
         if ((event.flags and KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0) {
@@ -322,6 +391,7 @@ class KeyboardInputHandler(private val game: Game) {
                 val currentTime = System.currentTimeMillis()
 
                 if (currentTime - lastEscPressTime <= ESC_DOUBLE_PRESS_INTERVAL && hasShownEscHint) {
+                    handleCustomKeyUp(event, cancel = true)
                     game.onBackPressed()
                     lastEscPressTime = 0
                     hasShownEscHint = false
@@ -341,60 +411,7 @@ class KeyboardInputHandler(private val game: Game) {
         val keyCode = event.keyCode
         pressedKeys.remove(keyCode)
 
-        if (game.prefConfig.enableCustomKeyMap) {
-            if (keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                handler.removeCallbacks(escConfirmRunnable)
-                when (escState) {
-                    1 -> {
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_ESCAPE, event.deviceId)
-                        sendKeyDown(KeyEvent.KEYCODE_ESCAPE, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        val release = Runnable {
-                            escTapRelease = null
-                            sendTrackedKeyUp(KeyEvent.KEYCODE_ESCAPE, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        }
-                        escTapRelease = release
-                        handler.postDelayed(release, 50)
-                        escState = 0
-                    }
-                    2 -> {
-                        escState = 0
-                    }
-                    else -> {
-                        val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_ESCAPE, event.deviceId)
-                        sendTrackedKeyUp(KeyEvent.KEYCODE_ESCAPE, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                        escState = 0
-                    }
-                }
-                return true
-            }
-            if (escState == 2) {
-                if (keyCode == KeyEvent.KEYCODE_Q) {
-                    game.onBackPressed()
-                    return true
-                }
-                if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
-                    val fKeyCode = KeyEvent.KEYCODE_F1 + (keyCode - KeyEvent.KEYCODE_1)
-                    val translated = keyboardTranslator.translate(fKeyCode, event.deviceId)
-                    sendTrackedKeyUp(fKeyCode, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                    return true
-                }
-                if (keyCode == KeyEvent.KEYCODE_0) {
-                    val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F10, event.deviceId)
-                    sendTrackedKeyUp(KeyEvent.KEYCODE_F10, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                    return true
-                }
-                if (keyCode == KeyEvent.KEYCODE_MINUS) {
-                    val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F11, event.deviceId)
-                    sendTrackedKeyUp(KeyEvent.KEYCODE_F11, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                    return true
-                }
-                if (keyCode == KeyEvent.KEYCODE_EQUALS) {
-                    val translated = keyboardTranslator.translate(KeyEvent.KEYCODE_F12, event.deviceId)
-                    sendTrackedKeyUp(KeyEvent.KEYCODE_F12, translated, 0.toByte(), MoonBridge.SS_KBE_FLAG_NON_NORMALIZED)
-                    return true
-                }
-            }
-        }
+        if (handleCustomKeyUp(event)) return true
 
         // Pass-through virtual navigation keys
         if ((event.flags and KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0) {
