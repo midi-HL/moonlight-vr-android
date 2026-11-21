@@ -242,6 +242,73 @@ class VrNativeInputBoundaryRuntimeTest {
         }
     }
 
+    @Test fun unrelatedMouseHoverDoesNotCancelAHeldGamepadAxis() {
+        var moves = 0
+        var beforeMouse = 0
+        withWindowAcrossWaits { scenario ->
+            scenario.onActivity { activity ->
+                focusedButton(activity).setOnKeyListener { _, key, event ->
+                    if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (event.action == KeyEvent.ACTION_DOWN) moves++
+                        true
+                    } else false
+                }
+                val held = axis(0f, hatY = 1f)
+                try { assertTrue(activity.window.callback.dispatchGenericMotionEvent(held)) }
+                finally { held.recycle() }
+            }
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 2 + 100)
+            scenario.onActivity { activity ->
+                assertTrue("The initial held sample must already repeat", moves >= 2)
+                beforeMouse = moves
+                val now = SystemClock.uptimeMillis()
+                val hover = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 4f, 4f, 0)
+                hover.source = InputDevice.SOURCE_MOUSE
+                try { activity.window.callback.dispatchGenericMotionEvent(hover) }
+                finally { hover.recycle() }
+            }
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 2 + 100)
+            scenario.onActivity {
+                assertTrue("Mouse motion must leave the other device's held navigation active", moves > beforeMouse)
+            }
+        }
+    }
+
+    @Test fun onlyTheOwningGamepadCanReleaseOrCancelHeldNavigation() {
+        var moves = 0
+        var checkpoint = 0
+        withWindowAcrossWaits { scenario ->
+            fun send(device: Int, hat: Float, action: Int = MotionEvent.ACTION_MOVE) {
+                scenario.onActivity { activity ->
+                    val event = axis(0f, hat, device, action)
+                    try { assertTrue(activity.window.callback.dispatchGenericMotionEvent(event)) }
+                    finally { event.recycle() }
+                }
+            }
+            scenario.onActivity { activity ->
+                focusedButton(activity).setOnKeyListener { _, key, event ->
+                    if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (event.action == KeyEvent.ACTION_DOWN) moves++
+                        true
+                    } else false
+                }
+            }
+            send(15, 1f)
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 2 + 100)
+            scenario.onActivity { assertTrue(moves >= 2); checkpoint = moves }
+            send(16, 0f)
+            send(16, 0f, MotionEvent.ACTION_CANCEL)
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 2 + 100)
+            scenario.onActivity {
+                assertTrue("Another pad's neutral/cancel must preserve the active pad", moves > checkpoint)
+            }
+            send(15, 0f)
+            scenario.onActivity { checkpoint = moves }
+            SystemClock.sleep(VrSettings.DEFAULT.menuRepeatMs * 2 + 100)
+            scenario.onActivity { assertEquals("The owning pad's release must stop navigation", checkpoint, moves) }
+        }
+    }
+
     private fun withWindow(block: (HelpActivity, Button) -> Unit) = withWindowAcrossWaits { scenario ->
         scenario.onActivity { block(it, focusedButton(it)) }
     }
@@ -279,14 +346,14 @@ class VrNativeInputBoundaryRuntimeTest {
     private fun key(time: Long, action: Int, keyCode: Int) = KeyEvent(time,
         SystemClock.uptimeMillis(), action, keyCode, 0, 0, 15, 0, 0, InputDevice.SOURCE_GAMEPAD)
 
-    private fun axis(y: Float, hatY: Float = 0f): MotionEvent {
+    private fun axis(y: Float, hatY: Float = 0f, deviceId: Int = 15, action: Int = MotionEvent.ACTION_MOVE): MotionEvent {
         val coords = arrayOf(MotionEvent.PointerCoords().apply {
             setAxisValue(MotionEvent.AXIS_Y, y)
             setAxisValue(MotionEvent.AXIS_HAT_Y, hatY)
         })
         val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0 })
         val now = SystemClock.uptimeMillis()
-        return MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 1, props, coords,
-            0, 0, 1f, 1f, 15, 0, InputDevice.SOURCE_JOYSTICK, 0)
+        return MotionEvent.obtain(now, now, action, 1, props, coords,
+            0, 0, 1f, 1f, deviceId, 0, InputDevice.SOURCE_JOYSTICK, 0)
     }
 }

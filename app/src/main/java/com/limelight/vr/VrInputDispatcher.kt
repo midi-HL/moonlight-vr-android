@@ -34,7 +34,10 @@ object VrInputDispatcher {
         private var watchingDevice = false
         private val deviceListener = object : InputManager.InputDeviceListener {
             override fun onInputDeviceAdded(deviceId: Int) = Unit
-            override fun onInputDeviceChanged(deviceId: Int) = Unit
+            override fun onInputDeviceChanged(deviceId: Int) {
+                if (axes?.deviceId == deviceId && !VrGamepadRouter.isGamepad(
+                        inputManager?.getInputDevice(deviceId)?.sources ?: 0)) cancelAxes()
+            }
             override fun onInputDeviceRemoved(deviceId: Int) {
                 if (axes?.deviceId == deviceId) cancelAxes()
             }
@@ -109,6 +112,7 @@ object VrInputDispatcher {
                 return
             }
             if (direction == 0) {
+                if (axes != null && axes?.deviceId != value.deviceId) return
                 cancelAxes()
                 emit(value, now)
                 return
@@ -132,7 +136,8 @@ object VrInputDispatcher {
             if (axes != null) handler.postAtTime(repeat, nextRepeatAt)
         }
 
-        fun cancelAxes() {
+        fun cancelAxes(deviceId: Int? = null) {
+            if (deviceId != null && axes?.deviceId != deviceId) return
             handler.removeCallbacks(repeat)
             if (watchingDevice) {
                 inputManager?.unregisterInputDeviceListener(deviceListener)
@@ -244,10 +249,13 @@ object VrInputDispatcher {
         state: WindowState? = null,
         deliverKey: (KeyEvent) -> Boolean,
     ): Boolean {
-        if (!VrSession.enabled || !VrGamepadRouter.isGamepad(event.source)) {
+        if (!VrSession.enabled) {
             state?.cancelAxes()
             return false
         }
+        // A mouse can move while an edge-only gamepad is held. Unrelated input must not
+        // discard the pad's last state: it may not produce another event until released.
+        if (!VrGamepadRouter.isGamepad(event.source)) return false
         // A stream (including its START wheel) consumes real stick and HAT state.
         // Its native game menu also owns its axis navigation, so keep both paths.
         if (!VrSession.panelOpen && activity is Game && (!inDialog || activity.hasNativeGameMenu())) {
@@ -255,7 +263,7 @@ object VrInputDispatcher {
             return false
         }
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            state?.cancelAxes()
+            state?.cancelAxes(event.deviceId)
             return true
         }
         if (event.actionMasked != MotionEvent.ACTION_MOVE) return false
