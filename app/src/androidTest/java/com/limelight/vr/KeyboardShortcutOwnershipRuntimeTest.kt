@@ -17,6 +17,7 @@ import com.limelight.Game
 import com.limelight.HelpActivity
 import com.limelight.KeyboardInputHandler
 import com.limelight.TouchInputHandler
+import com.limelight.binding.input.ControllerHandler
 import com.limelight.binding.input.KeyboardTranslator
 import com.limelight.nvstream.NvConnection
 import com.limelight.nvstream.StreamConfiguration
@@ -27,6 +28,8 @@ import com.limelight.preferences.PreferenceConfiguration
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -233,7 +236,18 @@ class KeyboardShortcutOwnershipRuntimeTest {
                 Game::class.java.declaredFields.single { NvConnection::class.java.isAssignableFrom(it.type) }
                     .apply { isAccessible = true }.set(game, connection)
                 val handler = KeyboardInputHandler(game).apply { keyboardTranslator = KeyboardTranslator() }
-                fixture = Fixture(game, handler, connection)
+                val keyboards = InputDevice.getDeviceIds().asSequence().mapNotNull { InputDevice.getDevice(it) }
+                    .filter { it.supportsSource(InputDevice.SOURCE_KEYBOARD) &&
+                        !ControllerHandler.isGameControllerDevice(it) }.toList()
+                val keyboardA = keyboards.firstOrNull { it.isVirtual }
+                val keyboardB = keyboards.firstOrNull { !it.isVirtual &&
+                    it.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC }
+                assertNotNull("An existing non-controller virtual keyboard is required for role A", keyboardA)
+                assertNotNull("An existing non-controller physical alphabetic keyboard is required for role B", keyboardB)
+                val roles = mapOf(KEYBOARD_A to requireNotNull(keyboardA).id,
+                    KEYBOARD_B to requireNotNull(keyboardB).id)
+                assertTrue("The two keyboard roles must use distinct existing devices", roles.values.toSet().size == 2)
+                fixture = Fixture(game, handler, connection, roles)
             }
             block(requireNotNull(fixture))
         } finally {
@@ -245,7 +259,8 @@ class KeyboardShortcutOwnershipRuntimeTest {
     private data class Press(val keyCode: Int, val deviceId: Int, val downTime: Long)
     private data class Packet(val keyMap: Short, val direction: Byte)
 
-    private class Fixture(val game: Game, val handler: KeyboardInputHandler, val connection: RecordingConnection) {
+    private class Fixture(val game: Game, val handler: KeyboardInputHandler, val connection: RecordingConnection,
+                          private val keyboardRoles: Map<Int, Int>) {
         private var lastDownTime = 0L
         fun onMain(action: () -> Unit) {
             if (Looper.myLooper() == Looper.getMainLooper()) action()
@@ -269,9 +284,10 @@ class KeyboardShortcutOwnershipRuntimeTest {
             onMain { assertEquals("Timed keyboard action never reached the host packet API", expected, connection.packets.size) }
         }
 
-        fun down(keyCode: Int, deviceId: Int = KEYBOARD_A): Press {
+        fun down(keyCode: Int, keyboardRole: Int = KEYBOARD_A): Press {
             val time = SystemClock.uptimeMillis().coerceAtLeast(lastDownTime + 1)
             lastDownTime = time
+            val deviceId = requireNotNull(keyboardRoles[keyboardRole]) { "Unknown keyboard role" }
             return Press(keyCode, deviceId, time).also { send(it, KeyEvent.ACTION_DOWN) }
         }
 
@@ -282,6 +298,12 @@ class KeyboardShortcutOwnershipRuntimeTest {
             val event = KeyEvent(press.downTime, SystemClock.uptimeMillis().coerceAtLeast(press.downTime), action,
                 press.keyCode, repeat, 0, press.deviceId, 0, if (canceled) KeyEvent.FLAG_CANCELED else 0,
                 InputDevice.SOURCE_KEYBOARD)
+            val keyboard = event.device
+            assertNotNull("Every key event must resolve to an existing keyboard device", keyboard)
+            assertTrue("The event device must advertise SOURCE_KEYBOARD",
+                requireNotNull(keyboard).supportsSource(InputDevice.SOURCE_KEYBOARD))
+            assertFalse("Shortcut fixture events must take the production keyboard path",
+                ControllerHandler.isGameControllerDevice(keyboard))
             assertTrue(if (action == KeyEvent.ACTION_DOWN) handler.handleKeyDown(event) else handler.handleKeyUp(event))
         }
 
@@ -311,8 +333,9 @@ class KeyboardShortcutOwnershipRuntimeTest {
     }
 
     companion object {
-        private const val KEYBOARD_A = 27001
-        private const val KEYBOARD_B = 27002
+        // Logical roles only; Fixture resolves these to actual registered keyboard device IDs.
+        private const val KEYBOARD_A = 0
+        private const val KEYBOARD_B = 1
         private val DOWN = KeyboardPacket.KEY_DOWN
         private val UP = KeyboardPacket.KEY_UP
         private val FUNCTION_BOUNDARIES = listOf(KeyEvent.KEYCODE_1 to KeyEvent.KEYCODE_F1,
