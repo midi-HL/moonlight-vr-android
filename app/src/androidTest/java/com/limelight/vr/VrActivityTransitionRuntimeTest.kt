@@ -101,6 +101,12 @@ class VrActivityTransitionRuntimeTest {
                         lifecycle.firstSettingsPreResumedOrientation ?: Int.MIN_VALUE)
                 }
                 assertTrue("The same PcView must resume after settings closes", lifecycle.sourceResumes >= 2)
+                assertEquals("Settings must inflate in inherited landscape before creating its layout",
+                    Configuration.ORIENTATION_LANDSCAPE, lifecycle.firstSettingsCreatedConfiguration)
+                assertEquals("Entering settings in VR must not force a portrait-layout recreation",
+                    1, lifecycle.settingsCreates)
+                assertTrue("Every visible paused source must retain its stereo cover until stop",
+                    lifecycle.sourcePausedTheaters.isNotEmpty() && lifecycle.sourcePausedTheaters.all { it == 1 })
                 assertEquals("Returning to PcView must leave only one stereo host",
                     1, countTheaters(requireNotNull(source).window.decorView))
             }
@@ -138,6 +144,9 @@ class VrActivityTransitionRuntimeTest {
         var firstSettingsStartedOrientation: Int? = null
         var firstSettingsPreResumedOrientation: Int? = null
         var sourceResumes = 0
+        var settingsCreates = 0
+        var firstSettingsCreatedConfiguration: Int? = null
+        val sourcePausedTheaters = ArrayList<Int>()
 
         private fun record(stage: String, activity: Activity) {
             if (activity !is PcView && activity !is StreamSettings) return
@@ -148,7 +157,13 @@ class VrActivityTransitionRuntimeTest {
         }
 
         override fun onActivityCreated(activity: Activity, state: Bundle?) {
-            if (activity is StreamSettings) settingsActivity = activity
+            if (activity is StreamSettings) {
+                settingsActivity = activity
+                settingsCreates++
+                if (firstSettingsCreatedConfiguration == null) {
+                    firstSettingsCreatedConfiguration = activity.resources.configuration.orientation
+                }
+            }
             record("created", activity)
         }
         override fun onActivityStarted(activity: Activity) {
@@ -167,7 +182,10 @@ class VrActivityTransitionRuntimeTest {
             if (activity is PcView) sourceResumes++
             record("resumed", activity)
         }
-        override fun onActivityPaused(activity: Activity) = record("paused", activity)
+        override fun onActivityPaused(activity: Activity) {
+            if (activity is PcView) sourcePausedTheaters.add(countTheaters(activity.window.decorView))
+            record("paused", activity)
+        }
         override fun onActivityStopped(activity: Activity) = record("stopped", activity)
         override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
         override fun onActivityDestroyed(activity: Activity) = record("destroyed", activity)

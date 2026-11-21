@@ -1,6 +1,7 @@
 package com.limelight.ui
 
 import android.view.KeyEvent
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
@@ -103,6 +104,57 @@ class AdapterRecyclerBridgeKeyTest {
             assertEquals(1, clicks)
         }
     }
+
+    @Test
+    fun heldAStillClicksWhenThereIsNoLongClickAction() {
+        val time = SystemClock.uptimeMillis()
+        rule.runOnUiThread { card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_DOWN)) }
+        SystemClock.sleep(1100)
+        rule.runOnUiThread {
+            card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_UP))
+            assertEquals("A long hold must still confirm when no long action exists", 1, clicks)
+        }
+    }
+
+    @Test
+    fun repeatedDownDoesNotScheduleSeveralLongActions() {
+        var longClicks = 0
+        val time = SystemClock.uptimeMillis()
+        rule.runOnUiThread {
+            bridge.setOnItemLongClickListener { _, _ -> longClicks++; true }
+            card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_DOWN))
+            card().dispatchKeyEvent(KeyEvent.changeTimeRepeat(padKey(time, KeyEvent.ACTION_DOWN), time + 10, 1))
+            card().dispatchKeyEvent(KeyEvent.changeTimeRepeat(padKey(time, KeyEvent.ACTION_DOWN), time + 20, 2))
+        }
+        SystemClock.sleep(1100)
+        rule.runOnUiThread {
+            card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_UP))
+            assertEquals("One physical press must run one long action", 1, longClicks)
+            assertEquals(0, clicks)
+        }
+    }
+
+    @Test
+    fun detachingPressedHolderCancelsItsLongActionAndRelease() {
+        var longClicks = 0
+        val time = SystemClock.uptimeMillis()
+        rule.runOnUiThread {
+            bridge.setOnItemLongClickListener { _, _ -> longClicks++; true }
+            val holder = requireNotNull(recycler.findViewHolderForAdapterPosition(0)) as AdapterRecyclerBridge.VH
+            holder.itemView.dispatchKeyEvent(padKey(time, KeyEvent.ACTION_DOWN))
+            bridge.onViewDetachedFromWindow(holder)
+        }
+        SystemClock.sleep(1100)
+        rule.runOnUiThread {
+            card().dispatchKeyEvent(padKey(time, KeyEvent.ACTION_UP))
+            assertEquals("A detached holder must not receive a delayed long action", 0, longClicks)
+            assertEquals("Its release must not click a rebound item", 0, clicks)
+        }
+    }
+
+    private fun padKey(time: Long, action: Int): KeyEvent = KeyEvent(
+        time, SystemClock.uptimeMillis(), action, KeyEvent.KEYCODE_BUTTON_A, 0, 0, 11, 0
+    )
 
     private fun card(): View = requireNotNull(recycler.findViewHolderForAdapterPosition(0)).itemView
 }
