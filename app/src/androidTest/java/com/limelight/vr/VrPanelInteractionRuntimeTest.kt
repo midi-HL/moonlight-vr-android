@@ -43,7 +43,7 @@ class VrPanelInteractionRuntimeTest {
             scenario.onActivity { activity ->
                 activity.setContentView(LinearLayout(activity).apply {
                     orientation = LinearLayout.VERTICAL
-                    addView(Button(activity).apply { text = "First" })
+                    addView(Button(activity).apply { text = "First"; tag = "first-controller-button" })
                     addView(Button(activity).apply { text = "Second" })
                 })
                 block(activity)
@@ -101,11 +101,22 @@ class VrPanelInteractionRuntimeTest {
     @Test fun legacyControllerBackCompletesStreamMenuChord() {
         val context = instrumentation.targetContext
         val original = VrSession.settings
+        instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
         val scenario = ActivityScenario.launch<ComponentActivity>(Intent(context, ComponentActivity::class.java))
         try {
             scenario.onActivity { activity ->
                 VrSession.updateSettings(activity, VrSettings.DEFAULT.copy(enabled = true))
                 VrSession.setPanelOpen(false)
+            }
+            val deadline = SystemClock.uptimeMillis() + 15000
+            var ready = false
+            while (!ready && SystemClock.uptimeMillis() < deadline) {
+                scenario.onActivity { ready = it.resources.configuration.orientation ==
+                    android.content.res.Configuration.ORIENTATION_LANDSCAPE && it.hasWindowFocus() }
+                if (!ready) SystemClock.sleep(25)
+            }
+            assertTrue("Menu chord must start after the window has completed rotation", ready)
+            scenario.onActivity {
                 // Exercise the Game branch of the public router without starting a network
                 // session; host packet handling is covered by VrHostInputRuntimeTest.
                 val game = Game()
@@ -131,10 +142,10 @@ class VrPanelInteractionRuntimeTest {
         try {
             fixture { activity ->
                 VrSession.setPanelOpen(false)
-                val root = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
+                val root = activity.window.decorView
                 root.clearFocus()
                 var clicks = 0
-                val button = (root.getChildAt(0) as LinearLayout).getChildAt(0) as Button
+                val button = requireNotNull(root.findViewWithTag<Button>("first-controller-button"))
                 button.setOnClickListener { clicks++ }
                 press(activity, KeyEvent.KEYCODE_BUTTON_A)
                 assertTrue("A must establish a native UI focus without a preparatory X/Y", button.hasFocus())
