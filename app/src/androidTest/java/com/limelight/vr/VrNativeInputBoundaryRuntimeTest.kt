@@ -175,6 +175,14 @@ class VrNativeInputBoundaryRuntimeTest {
         var dialog: AlertDialog? = null
         withWindowAcrossWaits { scenario ->
             try {
+                val readyDeadline = SystemClock.uptimeMillis() + 15000
+                var ready = false
+                while (!ready && SystemClock.uptimeMillis() < readyDeadline) {
+                    scenario.onActivity { ready = it.hasWindowFocus() &&
+                        it.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE }
+                    if (!ready) SystemClock.sleep(25)
+                }
+                assertTrue("Activity must finish its VR orientation transition before showing dialog", ready)
                 scenario.onActivity { activity ->
                     val button = Button(activity).apply {
                         isFocusableInTouchMode = true
@@ -192,6 +200,15 @@ class VrNativeInputBoundaryRuntimeTest {
                     }
                 }
                 instrumentation.waitForIdleSync()
+                val focusDeadline = SystemClock.uptimeMillis() + 10000
+                var dialogFocused = false
+                while (!dialogFocused && SystemClock.uptimeMillis() < focusDeadline) {
+                    scenario.onActivity { activity -> dialogFocused =
+                        !activity.window.decorView.hasWindowFocus() &&
+                            dialog?.window?.decorView?.hasWindowFocus() == true }
+                    if (!dialogFocused) SystemClock.sleep(25)
+                }
+                assertTrue("Dialog must receive actual window focus before navigation", dialogFocused)
                 scenario.onActivity { activity ->
                     assertFalse("The real dialog must own window focus", activity.window.decorView.hasWindowFocus())
                     val event = axis(0f, hatY = 1f)
