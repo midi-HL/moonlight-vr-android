@@ -20,7 +20,7 @@ import org.junit.runner.RunWith
 class VrPanelInteractionRuntimeTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
-    private fun fixture(block: (ComponentActivity) -> Unit) {
+    private fun fixture(after: () -> Unit = {}, block: (ComponentActivity) -> Unit) {
         val context = instrumentation.targetContext
         val original = VrSession.settings
         instrumentation.runOnMainSync { VrSession.setEnabled(context, false) }
@@ -48,6 +48,8 @@ class VrPanelInteractionRuntimeTest {
                 })
                 block(activity)
             }
+            instrumentation.waitForIdleSync()
+            after()
         } finally {
             instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
             scenario.close()
@@ -139,17 +141,20 @@ class VrPanelInteractionRuntimeTest {
 
     @Test fun firstConfirmAcquiresOrdinaryButtonFocusWithoutXOrY() {
         instrumentation.setInTouchMode(true)
+        var clicks = 0
         try {
-            fixture { activity ->
+            fixture(after = {
+                instrumentation.runOnMainSync {
+                    assertEquals("The first complete A press must activate its focused control once", 1, clicks)
+                }
+            }) { activity ->
                 VrSession.setPanelOpen(false)
                 val root = activity.window.decorView
                 root.clearFocus()
-                var clicks = 0
                 val button = requireNotNull(root.findViewWithTag<Button>("first-controller-button"))
                 button.setOnClickListener { clicks++ }
                 press(activity, KeyEvent.KEYCODE_BUTTON_A)
                 assertTrue("A must establish a native UI focus without a preparatory X/Y", button.hasFocus())
-                assertEquals("The first complete A press must activate its focused control once", 1, clicks)
             }
         } finally {
             instrumentation.setInTouchMode(false)
