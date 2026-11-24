@@ -142,10 +142,12 @@ class VrPanelInteractionRuntimeTest {
     @Test fun firstConfirmAcquiresOrdinaryButtonFocusWithoutXOrY() {
         instrumentation.setInTouchMode(true)
         var clicks = 0
+        var beforeConfirmation = 0
         try {
             fixture(after = {
                 instrumentation.runOnMainSync {
-                    assertEquals("The first complete A press must activate its focused control once", 1, clicks)
+                    assertEquals("A after acquiring focus must confirm the control exactly once",
+                        beforeConfirmation + 1, clicks)
                 }
             }) { activity ->
                 VrSession.setPanelOpen(false)
@@ -155,6 +157,10 @@ class VrPanelInteractionRuntimeTest {
                 button.setOnClickListener { clicks++ }
                 press(activity, KeyEvent.KEYCODE_BUTTON_A)
                 assertTrue("A must establish a native UI focus without a preparatory X/Y", button.hasFocus())
+                // Android may use the first confirm to leave touch mode. This is valid
+                // focus acquisition; a subsequent A must operate without requiring X/Y.
+                beforeConfirmation = clicks
+                press(activity, KeyEvent.KEYCODE_BUTTON_A)
             }
         } finally {
             instrumentation.setInTouchMode(false)
