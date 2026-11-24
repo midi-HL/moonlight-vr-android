@@ -93,7 +93,9 @@ class VrPanelInteractionRuntimeTest {
             scenario.onActivity { activity ->
                 VrSession.updateSettings(activity, VrSettings.DEFAULT.copy(enabled = true))
                 VrSession.setPanelOpen(false)
-                val game = Game().apply { connected = true }
+                // Exercise the Game branch of the public router without starting a network
+                // session; host packet handling is covered by VrHostInputRuntimeTest.
+                val game = Game()
                 val time = SystemClock.uptimeMillis()
                 for (key in listOf(KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BACK)) {
                     val event = KeyEvent(time, time, KeyEvent.ACTION_DOWN, key, 0, 0, -1, 0, 0,
