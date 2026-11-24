@@ -139,10 +139,10 @@ class VrGamepadRouter {
             }
             // Direction repeats are useful. Confirmation and dismissal must be fresh presses.
             return if (panelOpen) when (keyCode) {
-                VrKeys.DPAD_UP -> Command.Move(-1)
-                VrKeys.DPAD_DOWN -> Command.Move(1)
-                VrKeys.DPAD_LEFT -> if (editing) Command.Adjust(-1) else Command.Consumed
-                VrKeys.DPAD_RIGHT -> if (editing) Command.Adjust(1) else Command.Consumed
+                VrKeys.DPAD_UP -> if (editing) Command.Adjust(-1) else Command.Move(-1)
+                VrKeys.DPAD_DOWN -> if (editing) Command.Adjust(1) else Command.Move(1)
+                VrKeys.DPAD_LEFT -> Command.Adjust(-1)
+                VrKeys.DPAD_RIGHT -> Command.Adjust(1)
                 else -> Command.Consumed
             } else Command.Consumed
         }
@@ -174,10 +174,10 @@ class VrGamepadRouter {
         if (panelOpen) {
             captured.add(button)
             return when (keyCode) {
-                VrKeys.DPAD_UP -> Command.Move(-1)
-                VrKeys.DPAD_DOWN -> Command.Move(1)
-                VrKeys.DPAD_LEFT -> if (editing) Command.Adjust(-1) else Command.Consumed
-                VrKeys.DPAD_RIGHT -> if (editing) Command.Adjust(1) else Command.Consumed
+                VrKeys.DPAD_UP -> if (editing) Command.Adjust(-1) else Command.Move(-1)
+                VrKeys.DPAD_DOWN -> if (editing) Command.Adjust(1) else Command.Move(1)
+                VrKeys.DPAD_LEFT -> Command.Adjust(-1)
+                VrKeys.DPAD_RIGHT -> Command.Adjust(1)
                 VrKeys.BUTTON_A, VrKeys.DPAD_CENTER, VrKeys.ENTER -> Command.Confirm
                 VrKeys.BUTTON_B, VrKeys.BUTTON_SELECT,
                 VrKeys.BUTTON_START, VrKeys.BUTTON_MODE -> Command.ClosePanel
@@ -201,7 +201,7 @@ class VrGamepadRouter {
             if (editing) return Command.Adjust(if (y < 0) -1 else 1)
             return Command.Move(if (y < 0) -1 else 1)
         }
-        if (editing && abs(x) > deadZone) {
+        if (abs(x) > deadZone) {
             lastAxisMs = timeMs
             return Command.Adjust(if (x < 0) -1 else 1)
         }
@@ -272,8 +272,8 @@ class VrGamepadRouter {
         lastHatDirection = direction
         if (timeMs != null) lastHatMs = timeMs
         return when (direction) {
-            -1, 1 -> Command.Move(direction)
-            -2, 2 -> if (editing) Command.Adjust(direction / 2) else Command.Consumed
+            -1, 1 -> if (editing) Command.Adjust(direction) else Command.Move(direction)
+            -2, 2 -> Command.Adjust(direction / 2)
             else -> Command.Consumed
         }
     }

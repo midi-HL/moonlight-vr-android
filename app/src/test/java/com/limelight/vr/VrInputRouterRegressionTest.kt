@@ -6,6 +6,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VrInputRouterRegressionTest {
+    @Test fun panelRangeDirectionsDoNotRequireConfirmationAndEditingKeepsSelection() {
+        val router = VrGamepadRouter().apply { vrEnabled = true; panelOpen = true }
+        assertEquals(VrGamepadRouter.Command.Adjust(1),
+            router.onKey(VrKeys.DPAD_RIGHT, VrKeys.ACTION_DOWN, true))
+        assertEquals(VrGamepadRouter.Command.Adjust(1),
+            router.onKey(VrKeys.DPAD_RIGHT, VrKeys.ACTION_DOWN, true, isRepeat = true))
+        router.onKey(VrKeys.DPAD_RIGHT, VrKeys.ACTION_UP, true)
+        assertEquals(VrGamepadRouter.Command.Adjust(-1), router.onHat(-1f, 0f, 1000L))
+        router.editing = true
+        assertEquals(VrGamepadRouter.Command.Adjust(-1),
+            router.onKey(VrKeys.DPAD_UP, VrKeys.ACTION_DOWN, true))
+        assertEquals(VrGamepadRouter.Command.Adjust(1), router.onHat(0f, 1f, 1200L))
+        assertEquals(VrGamepadRouter.Command.Adjust(1), router.onAxis(1f, 0f, 1400L))
+        router.editing = false
+        router.resetAxisHold()
+        assertEquals(VrGamepadRouter.Command.Move(-1), router.onAxis(0f, -1f, 1600L))
+    }
+
     @Test
     fun focusCancellationKeepsHostReleaseAcrossPanelOpenButStopsOldChords() {
         val router = VrGamepadRouter().apply { vrEnabled = true }

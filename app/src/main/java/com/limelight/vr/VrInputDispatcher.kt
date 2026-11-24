@@ -233,7 +233,10 @@ object VrInputDispatcher {
             event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
         val backOwnedByHost = inDialog || (activity is Game && activity.connected && (controllerKey || mouseBack))
         val capturedByVr = VrSession.onKeyEvent(event, controllerKey, backOwnedByHost,
-                captureUiMenuKeys = activity !is Game || inDialog)
+                captureUiMenuKeys = activity !is Game || inDialog,
+                controllerBackAsSelect = event.keyCode == KeyEvent.KEYCODE_BACK && !mouseBack &&
+                    (VrGamepadRouter.isGamepad(event.source) ||
+                        VrGamepadRouter.isGamepad(event.device?.sources ?: 0)))
         if (consumeCanceledTail(event) || capturedByVr) return true
         val nativeBack = event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE
         if (!VrSession.enabled || (!controllerKey && !nativeBack) || (activity is Game && !inDialog)) return deliver(event)

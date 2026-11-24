@@ -12,6 +12,8 @@ import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.SearchEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.SurfaceView
 import android.view.Window
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -46,10 +48,37 @@ class VrActivityHooks(
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (VrSession.enabled && !VrSession.panelOpen && activity !is com.limelight.Game &&
+            event.action == KeyEvent.ACTION_DOWN && !event.isCanceled && event.repeatCount == 0 &&
+            VrInputDispatcher.isControllerKey(event) &&
+            (event.keyCode == KeyEvent.KEYCODE_BUTTON_A || event.keyCode in VrKeys.FOCUS_KEYS)) {
+            ensureControllerFocus()
+        }
         return VrInputDispatcher.dispatchKey(activity, event, inDialog, inputState, delegate::dispatchKeyEvent)
     }
 
+    /** Consumed A/axis events never reach ViewRoot's normal touch-mode transition. */
+    private fun ensureControllerFocus() {
+        val decor = inputWindow.decorView
+        val focused = decor.findFocus()
+        if (focused != null && focused !== decor && focused.id != android.R.id.content) return
+        fun find(view: View): View? {
+            if (view.visibility != View.VISIBLE || !view.isEnabled || view is VrTheaterView || view is SurfaceView) return null
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) find(view.getChildAt(index))?.let { return it }
+            }
+            return view.takeIf { it.isFocusable && it !== decor && it.id != android.R.id.content }
+        }
+        find(decor)?.requestFocusFromTouch()
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (VrSession.enabled && !VrSession.panelOpen && activity !is com.limelight.Game &&
+            VrGamepadRouter.isGamepad(event.source) && event.actionMasked == MotionEvent.ACTION_MOVE &&
+            (kotlin.math.abs(event.getAxisValue(VrKeys.AXIS_X)) > VrSession.settings.gamepadDeadZone ||
+                kotlin.math.abs(event.getAxisValue(VrKeys.AXIS_Y)) > VrSession.settings.gamepadDeadZone ||
+                kotlin.math.abs(event.getAxisValue(VrKeys.AXIS_HAT_X)) > 0.5f ||
+                kotlin.math.abs(event.getAxisValue(VrKeys.AXIS_HAT_Y)) > 0.5f)) ensureControllerFocus()
         if (VrInputDispatcher.dispatchMotion(activity, event, inDialog, inputState, delegate::dispatchKeyEvent)) return true
         return delegate.dispatchGenericMotionEvent(event)
     }

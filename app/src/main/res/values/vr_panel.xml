@@ -16,6 +16,6 @@
     <string name="vr_panel_zoom">Fit zoom</string>
     <string name="vr_panel_recenter">Recenter view</string>
     <string name="vr_panel_exit">Exit VR</string>
-    <string name="vr_panel_hint">↑ ↓ Browse     A Select or adjust     B Close</string>
-    <string name="vr_panel_edit_hint">← → or stick Adjust     A Done     B Back</string>
+    <string name="vr_panel_hint">↑ ↓ Browse     ← → Adjust     A Select     B Close</string>
+    <string name="vr_panel_edit_hint">D-pad or stick Adjust     A Done     B Back</string>
 </resources>

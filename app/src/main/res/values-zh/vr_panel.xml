@@ -15,6 +15,6 @@
     <string name="vr_panel_zoom">整体放大</string>
     <string name="vr_panel_recenter">重置视角中心</string>
     <string name="vr_panel_exit">退出 VR</string>
-    <string name="vr_panel_hint">↑ ↓ 选择     A 确认或调节     B 关闭</string>
-    <string name="vr_panel_edit_hint">← → 或摇杆 调节     A 完成     B 返回</string>
+    <string name="vr_panel_hint">↑ ↓ 选择  ← → 调节  A 确认  B 关闭</string>
+    <string name="vr_panel_edit_hint">方向键或摇杆 调节     A 完成     B 返回</string>
 </resources>

@@ -226,10 +226,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         isControllerKey: Boolean,
         backOwnedByHost: Boolean,
         captureUiMenuKeys: Boolean = false,
+        controllerBackAsSelect: Boolean = false,
     ): Boolean {
         // A mouse/controller press already sent to Game must retain its matching release
         // even if a different device opens the VR panel while that press is held.
-        if (event.keyCode == VrKeys.BACK) {
+        if (event.keyCode == VrKeys.BACK && !controllerBackAsSelect) {
             return when (backOwnership.onKey(event.action, event.deviceId, event.downTime,
                     event.repeatCount > 0, event.isCanceled, enabled,
                     backOwnedByHost || !panelOpen, panelOpen)) {
@@ -238,7 +239,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
                 VrBackKeyOwnership.Result.InvokeBack -> { onBackInvoked(); true }
             }
         }
-        return handle(router.onKey(event.keyCode, event.action, isControllerKey,
+        val keyCode = if (controllerBackAsSelect) VrKeys.BUTTON_SELECT else event.keyCode
+        return handle(router.onKey(keyCode, event.action, isControllerKey,
             event.deviceId, event.repeatCount > 0, captureUiMenuKeys, downTime = event.downTime))
     }
 
