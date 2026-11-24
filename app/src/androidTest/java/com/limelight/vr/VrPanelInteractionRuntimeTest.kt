@@ -46,8 +46,9 @@ class VrPanelInteractionRuntimeTest {
                     addView(Button(activity).apply { text = "First"; tag = "first-controller-button" })
                     addView(Button(activity).apply { text = "Second" })
                 })
-                block(activity)
             }
+            instrumentation.waitForIdleSync()
+            scenario.onActivity(block)
             instrumentation.waitForIdleSync()
             after()
         } finally {
