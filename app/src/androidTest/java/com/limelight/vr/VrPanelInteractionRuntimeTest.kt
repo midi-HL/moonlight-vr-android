@@ -27,14 +27,27 @@ class VrPanelInteractionRuntimeTest {
         val scenario = ActivityScenario.launch<ComponentActivity>(Intent(context, ComponentActivity::class.java))
         try {
             scenario.onActivity { activity ->
+                VrSession.updateSettings(activity, VrSettings.DEFAULT.copy(enabled = true))
+            }
+            // Enabling VR can recreate ComponentActivity for landscape. Install test UI
+            // only after that transition; an old instance's content is not the oracle.
+            val deadline = SystemClock.uptimeMillis() + 15000
+            var ready = false
+            while (!ready && SystemClock.uptimeMillis() < deadline) {
+                scenario.onActivity { ready = it.resources.configuration.orientation ==
+                    android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+                    it.window.decorView.width > it.window.decorView.height && it.hasWindowFocus() }
+                if (!ready) SystemClock.sleep(25)
+            }
+            assertTrue("Test Activity must settle in focused landscape before installing controls", ready)
+            scenario.onActivity { activity ->
                 activity.setContentView(LinearLayout(activity).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(Button(activity).apply { text = "First" })
                     addView(Button(activity).apply { text = "Second" })
                 })
-                VrSession.updateSettings(activity, VrSettings.DEFAULT.copy(enabled = true))
+                block(activity)
             }
-            scenario.onActivity(block)
         } finally {
             instrumentation.runOnMainSync { VrSession.updateSettings(context, original.copy(enabled = false)) }
             scenario.close()
