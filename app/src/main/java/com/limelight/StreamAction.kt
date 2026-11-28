@@ -141,12 +141,21 @@ object StreamActionRegistry {
         ),
     )
 
-    fun getBuiltin(id: String): StreamAction? = BUILTIN[id]?.takeIf { isAvailableInCurrentMode(id) }
+    fun getBuiltin(id: String): StreamAction? = getBuiltin(id, VrSession.enabled)
 
-    fun getAllActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> {
+    internal fun getBuiltin(id: String, vrEnabled: Boolean): StreamAction? =
+        BUILTIN[id]?.takeIf { isAvailableInCurrentMode(id, vrEnabled) }
+
+    fun getAllActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> =
+        getAllActions(customKeys, VrSession.enabled)
+
+    internal fun getAllActions(
+        customKeys: List<Array<String>>?,
+        vrEnabled: Boolean
+    ): LinkedHashMap<String, StreamAction> {
         val all = LinkedHashMap<String, StreamAction>()
         BUILTIN.forEach { (id, action) ->
-            if (isAvailableInCurrentMode(id)) all[id] = action
+            if (isAvailableInCurrentMode(id, vrEnabled)) all[id] = action
         }
         customKeys?.forEach { customKey ->
             val id = customActionId(customKey[0])
@@ -155,13 +164,19 @@ object StreamActionRegistry {
         return all
     }
 
-    private fun isAvailableInCurrentMode(id: String): Boolean =
-        id != "toggle_keyboard" || VrLocalImePolicy.isAvailable(VrSession.enabled)
+    private fun isAvailableInCurrentMode(id: String, vrEnabled: Boolean): Boolean =
+        id != "toggle_keyboard" || VrLocalImePolicy.isAvailable(vrEnabled)
 
-    fun getQuickActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> {
+    fun getQuickActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> =
+        getQuickActions(customKeys, VrSession.enabled)
+
+    internal fun getQuickActions(
+        customKeys: List<Array<String>>?,
+        vrEnabled: Boolean
+    ): LinkedHashMap<String, StreamAction> {
         val all = linkedMapOf<String, StreamAction>()
         QUICK_ACTION_IDS.forEach { id ->
-            getBuiltin(id)?.let { all[id] = it }
+            getBuiltin(id, vrEnabled)?.let { all[id] = it }
         }
         customKeys?.forEach { customKey ->
             val id = customActionId(customKey[0])

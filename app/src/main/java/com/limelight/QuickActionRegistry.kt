@@ -20,7 +20,13 @@ object QuickActionRegistry {
     fun getAllActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> =
         StreamActionRegistry.getQuickActions(customKeys)
 
+    internal fun getAllActions(customKeys: List<Array<String>>?, vrEnabled: Boolean): LinkedHashMap<String, StreamAction> =
+        StreamActionRegistry.getQuickActions(customKeys, vrEnabled)
+
     fun getBuiltin(id: String): StreamAction? = StreamActionRegistry.getBuiltin(id)
+
+    internal fun getBuiltin(id: String, vrEnabled: Boolean): StreamAction? =
+        StreamActionRegistry.getBuiltin(id, vrEnabled)
 
     fun defaultIds(context: Context): MutableList<String> {
         val config = (context as? Game)?.prefConfig

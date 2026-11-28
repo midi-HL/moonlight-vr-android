@@ -1,18 +1,25 @@
 package com.limelight
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QuickActionRegistryTest {
     @Test
     fun onlyLocalKeyboardRunsWithGameFocus() {
-        val focusedActionIds = QuickActionRegistry.getAllActions(null)
+        val focusedActionIds = QuickActionRegistry.getAllActions(null, vrEnabled = false)
             .values
             .filter(StreamAction::isWithGameFocus)
             .map(StreamAction::id)
 
         assertEquals(listOf("toggle_keyboard"), focusedActionIds)
+    }
+
+    @Test
+    fun localKeyboardActionIsHiddenOnlyWhileVrIsEnabled() {
+        assertTrue(QuickActionRegistry.getAllActions(null, vrEnabled = false).containsKey("toggle_keyboard"))
+        assertFalse(QuickActionRegistry.getAllActions(null, vrEnabled = true).containsKey("toggle_keyboard"))
     }
 
     @Test
