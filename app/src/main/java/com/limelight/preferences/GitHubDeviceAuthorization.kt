@@ -4,7 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
 import com.limelight.R

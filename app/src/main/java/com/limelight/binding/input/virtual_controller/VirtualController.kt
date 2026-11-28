@@ -19,7 +19,7 @@ import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.FrameLayout
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.view.OneShotPreDrawListener
 import androidx.preference.PreferenceManager
 import com.limelight.utils.AppActionSheet

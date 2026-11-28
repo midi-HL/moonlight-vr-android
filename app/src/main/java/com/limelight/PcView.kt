@@ -158,7 +158,7 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.Space
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.annotation.RequiresApi
 
 import javax.microedition.khronos.egl.EGLConfig

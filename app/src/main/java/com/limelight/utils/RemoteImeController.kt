@@ -15,6 +15,8 @@ import com.limelight.nvstream.RemoteTextContext
 import com.limelight.nvstream.RemoteTextContextPolicy
 import com.limelight.nvstream.ImeAvoidanceSession
 import com.limelight.ui.StreamView
+import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 
 /**
  * Avoids the open IME over the host's focused field. On API 30+ a trusted host
@@ -103,6 +105,7 @@ class RemoteImeController(
     }
 
     private fun maybeShow(context: RemoteTextContext, acceptedGeneration: Long) {
+        if (!VrLocalImePolicy.isAvailable(VrSession.enabled)) return
         if (autoShownActivationId == context.activationId) return
         if (ViewCompat.getRootWindowInsets(streamView)
                 ?.isVisible(WindowInsetsCompat.Type.ime()) == true
@@ -123,6 +126,12 @@ class RemoteImeController(
         streamView.requestFocus()
         streamView.post {
             if (disposed || generation != acceptedGeneration) return@post
+            // VR may have been enabled after this activation queued its IME request.
+            if (!VrLocalImePolicy.isAvailable(VrSession.enabled)) {
+                autoOwned = false
+                autoShownActivationId = 0L
+                return@post
+            }
             val shown = (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(streamView, InputMethodManager.SHOW_IMPLICIT) == true
             if (!shown) {

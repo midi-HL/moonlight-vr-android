@@ -5,7 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.view.KeyEvent
 import android.view.WindowManager
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.activity.ComponentDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

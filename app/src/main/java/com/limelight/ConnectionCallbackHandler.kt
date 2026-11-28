@@ -3,7 +3,7 @@ package com.limelight
 import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.binding.audio.MicrophoneManager
 import com.limelight.preferences.MicrophoneInitialState
 import com.limelight.nvstream.NvConnection

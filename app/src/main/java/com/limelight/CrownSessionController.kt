@@ -1,6 +1,6 @@
 package com.limelight
 
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.binding.input.advance_setting.ControllerManager
 
 class CrownSessionController(

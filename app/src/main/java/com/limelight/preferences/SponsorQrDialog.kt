@@ -14,7 +14,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.limelight.R

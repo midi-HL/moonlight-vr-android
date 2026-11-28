@@ -14,7 +14,7 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.R
 
 import java.io.BufferedReader

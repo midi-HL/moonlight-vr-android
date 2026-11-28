@@ -2,7 +2,7 @@ package com.limelight.preferences
 
 import android.content.Context
 import android.os.Bundle
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.preference.PreferenceDialogFragmentCompat
 import com.limelight.R
 import com.limelight.binding.input.virtual_controller.VirtualControllerConfigurationLoader.OSC_PREFERENCE

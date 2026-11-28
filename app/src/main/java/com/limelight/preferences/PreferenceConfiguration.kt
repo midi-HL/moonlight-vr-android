@@ -29,6 +29,16 @@ import kotlin.math.sqrt
 private fun SharedPreferences.getBooleanOrNull(key: String): Boolean? =
     if (contains(key)) getBoolean(key, false) else null
 
+private fun SharedPreferences.getFloatBallAction(key: String, defaultValue: String): String {
+    val value = getString(key, null)
+    if (value == "open_keyboard") {
+        // Remove the built-in keyboard action from existing installations too.
+        edit().putString(key, defaultValue).apply()
+        return defaultValue
+    }
+    return value ?: defaultValue
+}
+
 class PreferenceConfiguration {
 
     internal fun refreshControllerMotionPreferencesFrom(latest: PreferenceConfiguration) {
@@ -983,7 +993,7 @@ class PreferenceConfiguration {
         private const val DEFAULT_FLOAT_BALL_AUTO_HIDE_DELAY = 2000 // 默认2000ms
 
         // 悬浮球交互监听器默认值
-        private const val DEFAULT_FLOAT_BALL_SINGLE_CLICK_ACTION = "open_keyboard" // 单击打开键盘
+        private const val DEFAULT_FLOAT_BALL_SINGLE_CLICK_ACTION = "open_menu" // 旧键盘动作已移除，单击打开菜单
         private const val DEFAULT_FLOAT_BALL_DOUBLE_CLICK_ACTION = "open_menu" // 双击打开菜单
         private const val DEFAULT_FLOAT_BALL_LONG_CLICK_ACTION = "toggle_visibility" // 长按切换可见性
         private const val DEFAULT_FLOAT_BALL_SWIPE_UP_ACTION = "none" // 向上滑动无操作
@@ -1873,13 +1883,13 @@ class PreferenceConfiguration {
             config.floatBallAutoHideDelay = prefs.getInt(FLOAT_BALL_AUTO_HIDE_DELAY_PREF_STRING, DEFAULT_FLOAT_BALL_AUTO_HIDE_DELAY)
 
             // 读取悬浮球交互监听器设置
-            config.floatBallSingleClickAction = prefs.getString(FLOAT_BALL_SINGLE_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SINGLE_CLICK_ACTION) ?: DEFAULT_FLOAT_BALL_SINGLE_CLICK_ACTION
-            config.floatBallDoubleClickAction = prefs.getString(FLOAT_BALL_DOUBLE_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_DOUBLE_CLICK_ACTION) ?: DEFAULT_FLOAT_BALL_DOUBLE_CLICK_ACTION
-            config.floatBallLongClickAction = prefs.getString(FLOAT_BALL_LONG_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_LONG_CLICK_ACTION) ?: DEFAULT_FLOAT_BALL_LONG_CLICK_ACTION
-            config.floatBallSwipeUpAction = prefs.getString(FLOAT_BALL_SWIPE_UP_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_UP_ACTION) ?: DEFAULT_FLOAT_BALL_SWIPE_UP_ACTION
-            config.floatBallSwipeDownAction = prefs.getString(FLOAT_BALL_SWIPE_DOWN_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_DOWN_ACTION) ?: DEFAULT_FLOAT_BALL_SWIPE_DOWN_ACTION
-            config.floatBallSwipeLeftAction = prefs.getString(FLOAT_BALL_SWIPE_LEFT_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_LEFT_ACTION) ?: DEFAULT_FLOAT_BALL_SWIPE_LEFT_ACTION
-            config.floatBallSwipeRightAction = prefs.getString(FLOAT_BALL_SWIPE_RIGHT_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_RIGHT_ACTION) ?: DEFAULT_FLOAT_BALL_SWIPE_RIGHT_ACTION
+            config.floatBallSingleClickAction = prefs.getFloatBallAction(FLOAT_BALL_SINGLE_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SINGLE_CLICK_ACTION)
+            config.floatBallDoubleClickAction = prefs.getFloatBallAction(FLOAT_BALL_DOUBLE_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_DOUBLE_CLICK_ACTION)
+            config.floatBallLongClickAction = prefs.getFloatBallAction(FLOAT_BALL_LONG_CLICK_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_LONG_CLICK_ACTION)
+            config.floatBallSwipeUpAction = prefs.getFloatBallAction(FLOAT_BALL_SWIPE_UP_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_UP_ACTION)
+            config.floatBallSwipeDownAction = prefs.getFloatBallAction(FLOAT_BALL_SWIPE_DOWN_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_DOWN_ACTION)
+            config.floatBallSwipeLeftAction = prefs.getFloatBallAction(FLOAT_BALL_SWIPE_LEFT_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_LEFT_ACTION)
+            config.floatBallSwipeRightAction = prefs.getFloatBallAction(FLOAT_BALL_SWIPE_RIGHT_ACTION_PREF_STRING, DEFAULT_FLOAT_BALL_SWIPE_RIGHT_ACTION)
 
             return config
         }

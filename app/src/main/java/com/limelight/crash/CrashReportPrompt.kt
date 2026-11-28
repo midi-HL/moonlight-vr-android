@@ -13,7 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.core.content.FileProvider
 

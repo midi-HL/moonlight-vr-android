@@ -22,7 +22,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.ui.ThemedActivity
 import com.limelight.utils.AppDialogStyler
 import com.limelight.utils.UiHelper

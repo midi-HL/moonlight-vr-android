@@ -3,7 +3,7 @@ package com.limelight.preferences
 import android.os.Bundle
 import android.view.InputDevice
 import android.view.MotionEvent
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement

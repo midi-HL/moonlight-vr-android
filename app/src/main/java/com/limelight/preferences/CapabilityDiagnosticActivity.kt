@@ -20,7 +20,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.activity.compose.setContent
 import androidx.annotation.StringRes
 import androidx.lifecycle.lifecycleScope

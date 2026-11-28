@@ -16,7 +16,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.preferences.PreferenceConfiguration
 import com.limelight.ui.StreamView
 import com.limelight.utils.UiHelper

@@ -8,7 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.ImageButton
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat

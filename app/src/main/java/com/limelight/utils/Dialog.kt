@@ -12,7 +12,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.R
 
 class Dialog private constructor(

@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.net.toUri
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.LimeLog
 import com.limelight.R
 

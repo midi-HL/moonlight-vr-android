@@ -24,7 +24,7 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
+import com.limelight.utils.VrToast;
 
 import androidx.appcompat.widget.SwitchCompat;
 
@@ -1321,7 +1321,7 @@ public class WheelPad extends Element {
                         // 更新UI以反映移除
                         updateKeyCombinationDisplay(keysContainer, currentKeys, addButton, addGroupButton, dialog);
 
-                        Toast.makeText(context, R.string.wheel_group_removed, Toast.LENGTH_SHORT).show();
+                        VrToast.makeText(context, R.string.wheel_group_removed, VrToast.LENGTH_SHORT).show();
 
                         return true; // 返回true表示事件已被消费
                     });
@@ -1496,7 +1496,7 @@ public class WheelPad extends Element {
 
                             // 如果是新创建的，提示用户去配置
                             if (newElementToEdit != null) {
-                                Toast.makeText(context, R.string.wheel_new_group_created, Toast.LENGTH_LONG).show();
+                                VrToast.makeText(context, R.string.wheel_new_group_created, VrToast.LENGTH_LONG).show();
                                 elementController.toggleInfoPage(newElementToEdit.getInfoPage());
                             }
                         }

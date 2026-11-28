@@ -43,7 +43,9 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
+import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 import android.view.animation.AnimationUtils
 
 import androidx.activity.OnBackPressedCallback
@@ -179,6 +181,7 @@ class StreamSettings : ThemedAppCompatActivity() {
     private var drawerLayout: DrawerLayout? = null // 竖屏时使用，横屏时为 null
     private var categoryList: RecyclerView? = null
     private var categoryAdapter: CategoryAdapter? = null
+    private var landscapePreferenceFocusReturn: View? = null
     private val categories: MutableList<CategoryItem> = ArrayList()
     private var selectedCategoryIndex = 0
 
@@ -595,10 +598,17 @@ class StreamSettings : ThemedAppCompatActivity() {
         // 只有真正要打字时才让输入框可聚焦，这样手柄在搜索栏上时不会被输入框抢走焦点
         input.isFocusable = true
         input.isFocusableInTouchMode = true
-        input.showSoftInputOnFocus = true
+        val localImeAllowed = VrLocalImePolicy.isAvailable(VrSession.enabled)
+        input.showSoftInputOnFocus = localImeAllowed
         input.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        input.post { imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT) }
+        if (localImeAllowed) {
+            input.post {
+                if (VrLocalImePolicy.isAvailable(VrSession.enabled)) {
+                    imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+        }
     }
 
     private fun leaveSearchInput() {
@@ -712,7 +722,9 @@ class StreamSettings : ThemedAppCompatActivity() {
         if (categoryList != null && categoryAdapter != null && (categoryAdapter?.itemCount ?: 0) > 0) {
             categoryList?.post {
                 val vh = categoryList?.findViewHolderForAdapterPosition(selectedCategoryIndex)
-                vh?.itemView?.requestFocus()
+                // The ViewHolder root is a non-focusable FrameLayout. Focus its
+                // category row so controller navigation can enter the sidebar.
+                vh?.itemView?.findViewById<View>(R.id.category_item_root)?.requestFocus()
             }
         }
     }
@@ -838,6 +850,7 @@ class StreamSettings : ThemedAppCompatActivity() {
          */
         private fun selectCategory(position: Int, item: CategoryItem) {
             if (position < 0 || position >= categories.size) return
+            landscapePreferenceFocusReturn = null
 
             val oldIndex = selectedCategoryIndex
             selectedCategoryIndex = position
@@ -1018,6 +1031,14 @@ class StreamSettings : ThemedAppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val fragment = supportFragmentManager.findFragmentById(R.id.preference_container) as? SettingsFragment
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT && focusLandscapeCategoryFromPreference(fragment)) {
+                return true
+            }
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && restoreLandscapePreferenceFocusFromCategory(fragment)) {
+                return true
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) fragment?.recordSettingsHardwareInput()
         if (fragment?.activeSettingsScreenKey != null &&
             UiDismissKeyHandler.handle(event.action, event.keyCode) { fragment.closeSettingsScreen() }) return true
@@ -1027,6 +1048,50 @@ class StreamSettings : ThemedAppCompatActivity() {
                 event.repeatCount, event.metaState, event.deviceId, event.scanCode, event.flags, event.source)
         } else event
         return super.dispatchKeyEvent(navigationEvent)
+    }
+
+    /**
+     * The side-by-side settings layout has no DrawerLayout, so focus search from
+     * a preference row can stop inside its RecyclerView instead of reaching the
+     * left category RecyclerView. Give the horizontal boundary an explicit
+     * controller route while preserving left/right behavior inside widgets.
+     */
+    private fun focusLandscapeCategoryFromPreference(fragment: SettingsFragment?): Boolean {
+        if (resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
+            drawerLayout != null || fragment == null || fragment.activeSettingsScreenKey != null ||
+            categories.isEmpty() || categoryAdapter == null) return false
+
+        val focused = currentFocus ?: return false
+        val preferenceList = fragment.listView ?: return false
+        val focusedRow = preferenceList.findContainingItemView(focused) ?: return false
+        // Interactive children (sliders, switches and editor controls) own
+        // their horizontal keys; only a row-level focus crosses to categories.
+        if (focusedRow !== focused) return false
+
+        landscapePreferenceFocusReturn = focusedRow
+        focusSelectedCategory()
+        return true
+    }
+
+    /** Returns to the exact preference row from which the sidebar was entered. */
+    private fun restoreLandscapePreferenceFocusFromCategory(fragment: SettingsFragment?): Boolean {
+        if (resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
+            drawerLayout != null || fragment == null || fragment.activeSettingsScreenKey != null) return false
+
+        val focused = currentFocus ?: return false
+        val categories = categoryList ?: return false
+        val focusedItem = categories.findContainingItemView(focused) ?: return false
+        val categoryRoot = focusedItem.findViewById<View>(R.id.category_item_root) ?: return false
+        if (focused !== categoryRoot) return false
+
+        val returnTarget = landscapePreferenceFocusReturn ?: return false
+        if (!returnTarget.isShown || !returnTarget.isFocusable) {
+            landscapePreferenceFocusReturn = null
+            return false
+        }
+        val restored = returnTarget.requestFocus()
+        if (restored) landscapePreferenceFocusReturn = null
+        return restored
     }
 
     /**

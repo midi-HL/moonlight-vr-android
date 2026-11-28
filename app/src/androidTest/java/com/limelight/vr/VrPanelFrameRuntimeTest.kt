@@ -1,6 +1,9 @@
 package com.limelight.vr
 
 import android.view.View
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.cardboard.sdk.HeadTransform
@@ -14,6 +17,51 @@ import org.junit.runner.RunWith
 /** Exercises the main-thread capture queue and GL upload/visibility seam. */
 @RunWith(AndroidJUnit4::class)
 class VrPanelFrameRuntimeTest {
+    @Test fun redesignedPanelRendersOpaqueBackgroundAndCustomControlMarks() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val bitmap = Bitmap.createBitmap(1024, 576, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val panel = VrPanelView(instrumentation.targetContext).also { it.layoutFor(1024, 576) }
+        try {
+            instrumentation.runOnMainSync {
+                panel.drawInto(canvas, VrSettings.DEFAULT, selectedIndex = 0, editing = false)
+            }
+
+            assertEquals("Panel backdrop covers the formerly transparent canvas", 255,
+                Color.alpha(bitmap.getPixel(320, 120)))
+            val accent = Color.rgb(142, 235, 211)
+            val headsetAccentPixels = countColorNear(bitmap, left = 181, top = 55, right = 216, bottom = 90,
+                color = accent, tolerance = 8)
+            assertTrue("The custom headset mark is rendered above its background", headsetAccentPixels >= 8)
+            val selectedRowMarkPixels = countColorNear(bitmap, left = 185, top = 160, right = 220, bottom = 192,
+                color = accent, tolerance = 8)
+            assertTrue("The selected control has its own matching line icon", selectedRowMarkPixels >= 6)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun countColorNear(
+        bitmap: Bitmap,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int,
+        color: Int,
+        tolerance: Int,
+    ): Int {
+        var count = 0
+        for (y in top until bottom) for (x in left until right) {
+            val pixel = bitmap.getPixel(x, y)
+            if (Color.alpha(pixel) >= 240 &&
+                kotlin.math.abs(Color.red(pixel) - Color.red(color)) <= tolerance &&
+                kotlin.math.abs(Color.green(pixel) - Color.green(color)) <= tolerance &&
+                kotlin.math.abs(Color.blue(pixel) - Color.blue(color)) <= tolerance
+            ) count++
+        }
+        return count
+    }
+
     @Test fun firstPanelBitmapPublishedAfterTheFrameSnapshotSurvivesUntilTheNextFrame() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

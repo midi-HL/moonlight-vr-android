@@ -2,7 +2,7 @@ package com.limelight.utils
 
 import android.app.Activity
 import android.content.Intent
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.AppView
 import com.limelight.Game
 import com.limelight.R

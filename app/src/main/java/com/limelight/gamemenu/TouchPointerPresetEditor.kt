@@ -20,7 +20,9 @@ import android.widget.ScrollView
 import com.limelight.utils.AppSliderView
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
+import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 import androidx.core.content.ContextCompat
 import com.limelight.R
 import com.limelight.utils.AppDialogStyler
@@ -134,11 +136,16 @@ internal object TouchPointerPresetEditor {
         }
         fun enterNameEditing() {
             inputState.setEditing(true)
-            nameInput.showSoftInputOnFocus = true
+            val localImeAllowed = VrLocalImePolicy.isAvailable(VrSession.enabled)
+            nameInput.showSoftInputOnFocus = localImeAllowed
             nameInput.requestFocus()
             nameInput.setSelection(nameInput.text.length)
-            nameInput.post {
-                inputMethodManager?.showSoftInput(nameInput, InputMethodManager.SHOW_IMPLICIT)
+            if (localImeAllowed) {
+                nameInput.post {
+                    if (VrLocalImePolicy.isAvailable(VrSession.enabled)) {
+                        inputMethodManager?.showSoftInput(nameInput, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
             }
         }
         inputState.bind(::leaveNameEditing)

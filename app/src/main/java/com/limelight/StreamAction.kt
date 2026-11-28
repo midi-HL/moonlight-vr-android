@@ -4,11 +4,13 @@ import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.content.edit
 import com.limelight.binding.input.KeyboardTranslator
 import com.limelight.nvstream.NvConnection
 import com.limelight.nvstream.input.KeyboardPacket
+import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 import org.json.JSONObject
 
 private fun Int.toShortKey(): Short = toShort()
@@ -82,7 +84,6 @@ object StreamActionRegistry {
     private val QUICK_ACTION_IDS = listOf(
         "send_win",
         "send_esc",
-        "open_keyboard",
         "toggle_hdr",
         "toggle_mic",
         "send_sleep",
@@ -99,7 +100,6 @@ object StreamActionRegistry {
     )
 
     val BUILTIN = linkedMapOf(
-        "open_keyboard" to StreamAction("open_keyboard", "PC Keys", R.drawable.ic_send_keys_cute, 0, R.string.quick_btn_pc_keys),
         "open_menu" to StreamAction("open_menu", "Menu", R.drawable.ic_menu_item_default, labelRes = R.string.menu),
         "toggle_visibility" to StreamAction("toggle_visibility", "Hide", R.drawable.ic_btn_quit, labelRes = R.string.float_ball_action_toggle_visibility, tintableIcon = true),
         "send_win" to StreamAction("send_win", "Win", R.drawable.ic_btn_win, labelRes = R.string.quick_btn_win, tintableIcon = true),
@@ -141,10 +141,13 @@ object StreamActionRegistry {
         ),
     )
 
-    fun getBuiltin(id: String): StreamAction? = BUILTIN[id]
+    fun getBuiltin(id: String): StreamAction? = BUILTIN[id]?.takeIf { isAvailableInCurrentMode(id) }
 
     fun getAllActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> {
-        val all = LinkedHashMap(BUILTIN)
+        val all = LinkedHashMap<String, StreamAction>()
+        BUILTIN.forEach { (id, action) ->
+            if (isAvailableInCurrentMode(id)) all[id] = action
+        }
         customKeys?.forEach { customKey ->
             val id = customActionId(customKey[0])
             all[id] = StreamAction(id, customKey[0], 0)
@@ -152,10 +155,13 @@ object StreamActionRegistry {
         return all
     }
 
+    private fun isAvailableInCurrentMode(id: String): Boolean =
+        id != "toggle_keyboard" || VrLocalImePolicy.isAvailable(VrSession.enabled)
+
     fun getQuickActions(customKeys: List<Array<String>>?): LinkedHashMap<String, StreamAction> {
         val all = linkedMapOf<String, StreamAction>()
         QUICK_ACTION_IDS.forEach { id ->
-            BUILTIN[id]?.let { all[id] = it }
+            getBuiltin(id)?.let { all[id] = it }
         }
         customKeys?.forEach { customKey ->
             val id = customActionId(customKey[0])
@@ -176,10 +182,8 @@ class StreamActionExecutor(
         if (actionId.isNullOrEmpty() || actionId == "none") return false
 
         return when (actionId) {
-            "open_keyboard" -> {
-                game.toggleVirtualKeyboard()
-                true
-            }
+            // Previously saved float-ball profiles may still contain this removed action.
+            "open_keyboard" -> false
             "open_menu" -> {
                 game.showGameMenu(null)
                 true
@@ -222,6 +226,7 @@ class StreamActionExecutor(
                 (KeyboardTranslator.VK_F1 + 3).toShortKey()
             ))
             "toggle_keyboard" -> {
+                if (!VrLocalImePolicy.isAvailable(VrSession.enabled)) return false
                 game.toggleKeyboard()
                 true
             }

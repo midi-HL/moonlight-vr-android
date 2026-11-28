@@ -16,7 +16,7 @@ import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
-import android.widget.Toast;
+import com.limelight.utils.VrToast;
 import androidx.appcompat.widget.SwitchCompat;
 import com.limelight.utils.AppSwitchStyle;
 
@@ -797,7 +797,7 @@ public class GroupButton extends Element {
                     // 准备添加新元素前，检查该元素是否为本组按键自身
                     if (element == groupButton) {
                         // 如果是自身，则提示用户不能添加，并终止操作
-                        Toast.makeText(context, R.string.group_button_cannot_add_self, Toast.LENGTH_SHORT).show();
+                        VrToast.makeText(context, R.string.group_button_cannot_add_self, VrToast.LENGTH_SHORT).show();
                     } else {
                         // 如果不是自身，则正常添加为子元素
                         addChildElement(element);
@@ -830,9 +830,9 @@ public class GroupButton extends Element {
             isPermanentlyIndependent = isChecked; // 控制新的永久状态变量
             save(); // 保存更改
             if (isChecked) {
-                Toast.makeText(context, R.string.group_button_independent_on, Toast.LENGTH_SHORT).show();
+                VrToast.makeText(context, R.string.group_button_independent_on, VrToast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(context, R.string.group_button_independent_off, Toast.LENGTH_SHORT).show();
+                VrToast.makeText(context, R.string.group_button_independent_off, VrToast.LENGTH_SHORT).show();
             }
         });
 
@@ -846,7 +846,7 @@ public class GroupButton extends Element {
                 }
                 elementController.toggleInfoPage(groupButtonPage);
                 elementController.deleteElement(groupButton);
-                Toast.makeText(context, R.string.delete_success, Toast.LENGTH_SHORT).show();
+                VrToast.makeText(context, R.string.delete_success, VrToast.LENGTH_SHORT).show();
             }
         });
     }

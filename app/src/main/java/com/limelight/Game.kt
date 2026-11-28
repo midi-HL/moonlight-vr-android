@@ -20,7 +20,6 @@ import com.limelight.binding.input.KeyboardTranslator
 import com.limelight.binding.input.StartWheelAction
 import com.limelight.binding.input.advance_setting.ControllerManager
 import com.limelight.binding.input.advance_setting.CrownConfigPickerDialog
-import com.limelight.binding.input.advance_setting.KeyboardUIController
 import com.limelight.binding.input.capture.InputCaptureManager
 import com.limelight.binding.input.capture.InputCaptureProvider
 import com.limelight.binding.input.touch.AbsoluteTouchContext
@@ -122,7 +121,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.view.inputmethod.InputMethodManager
 import android.widget.ImageButton
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
+import com.limelight.vr.VrLocalImePolicy
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
@@ -172,7 +172,6 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
 
     var controllerManager: ControllerManager? = null
     private val crownSessionController = CrownSessionController(this) { controllerManager }
-    private var standaloneKeyboardUI: KeyboardUIController? = null
     private val performanceInfoDisplays = ArrayList<PerformanceInfoDisplay>()
 
     var microphoneManager: MicrophoneManager? = null
@@ -667,22 +666,8 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         bindExternalDisplay()
     }
 
-    private fun getOrCreateKeyboardUIController(): KeyboardUIController? {
-        if (controllerManager != null) {
-            val kUI = controllerManager?.keyboardUIController
-            if (kUI != null) return kUI
-        }
-        if (standaloneKeyboardUI == null) {
-            val keyboardContainer = findViewById<FrameLayout>(R.id.virtual_full_keyboard_container)
-            if (keyboardContainer != null) {
-                standaloneKeyboardUI = KeyboardUIController(keyboardContainer, createKeyboardEventListener(), this)
-            }
-        }
-        return standaloneKeyboardUI
-    }
-
     fun toggleVirtualKeyboard() {
-        getOrCreateKeyboardUIController()?.toggle()
+        // Retained for legacy saved controller mappings; the built-in keyboard was removed.
     }
 
     // region ---- Extracted helpers to reduce duplication ----
@@ -765,26 +750,6 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
             resources.getString(R.string.conn_establishing_title),
             resources.getString(R.string.conn_establishing_msg)
         )
-    }
-
-    /** Shared keyboard-event listener used by KeyboardUIController instances. */
-    private fun createKeyboardEventListener(): KeyboardUIController.OnKeyboardEventListener {
-        return object : KeyboardUIController.OnKeyboardEventListener {
-            override fun sendKeyEvent(down: Boolean, keyCode: Short) {
-                if (controllerManager?.elementController != null) {
-                    controllerManager?.elementController?.sendKeyEvent(down, keyCode)
-                } else {
-                    keyboardEvent(down, keyCode)
-                }
-            }
-            override fun rumbleSingleVibrator(lowFreq: Short, highFreq: Short, duration: Int) {
-                controllerManager?.elementController?.rumbleSingleVibrator(lowFreq, highFreq, duration)
-            }
-
-            override fun onKeyboardVisibilityChanged(visible: Boolean) {
-                controllerManager?.setVirtualElementsSuppressedByKeyboard(visible)
-            }
-        }
     }
 
     /** Refresh the on-screen controller layout after (re)creating the stream. */
@@ -2426,6 +2391,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     }
 
     override fun toggleKeyboard() {
+        if (!VrLocalImePolicy.isAvailable(VrSession.enabled)) return
         LimeLog.info("Toggling keyboard overlay")
         val inputManager = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         val imeVisible = ViewCompat.getRootWindowInsets(streamView)
@@ -2439,7 +2405,7 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
         streamView.isFocusableInTouchMode = true
         streamView.requestFocus()
         streamView.post {
-            if (!isFinishing && !isDestroyed) {
+            if (!isFinishing && !isDestroyed && VrLocalImePolicy.isAvailable(VrSession.enabled)) {
                 inputManager.showSoftInput(streamView, InputMethodManager.SHOW_IMPLICIT)
             }
         }
@@ -3757,12 +3723,6 @@ class Game : ThemedComponentActivity(), SurfaceHolder.Callback,
     fun initializeControllerManager() {
         val manager = controllerManager ?: ControllerManager(streamView.parent as FrameLayout, this)
             .also { controllerManager = it }
-        if (manager.keyboardUIController == null) {
-            manager.keyboardUIController = getOrCreateKeyboardUIController()
-        }
-        manager.setVirtualElementsSuppressedByKeyboard(
-            manager.keyboardUIController?.isVisible == true
-        )
         manager.refreshLayout()
     }
 

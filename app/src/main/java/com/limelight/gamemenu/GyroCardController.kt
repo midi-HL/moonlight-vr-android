@@ -2,7 +2,7 @@ package com.limelight.gamemenu
 
 import android.app.Dialog
 import android.view.KeyEvent
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.Game
 import com.limelight.R
 import com.limelight.binding.input.ControllerHandler

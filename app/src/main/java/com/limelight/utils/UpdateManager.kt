@@ -25,7 +25,7 @@ import android.view.WindowManager
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.annotation.RequiresApi
 import androidx.core.os.ConfigurationCompat

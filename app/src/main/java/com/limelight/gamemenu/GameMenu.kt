@@ -24,7 +24,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
+import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.CompositionLocalProvider
@@ -2234,12 +2236,18 @@ class GameMenu(
 
         fun enterNameEditing() {
             nameEditing = true
+            val localImeAllowed = VrLocalImePolicy.isAvailable(VrSession.enabled)
+            nameInput.showSoftInputOnFocus = localImeAllowed
             nameInput.requestFocus()
             nameInput.setSelection(nameInput.text.length)
-            nameInput.post {
-                val inputMethodManager = game.getSystemService(Context.INPUT_METHOD_SERVICE)
-                    as? InputMethodManager
-                inputMethodManager?.showSoftInput(nameInput, InputMethodManager.SHOW_IMPLICIT)
+            if (localImeAllowed) {
+                nameInput.post {
+                    if (VrLocalImePolicy.isAvailable(VrSession.enabled)) {
+                        val inputMethodManager = game.getSystemService(Context.INPUT_METHOD_SERVICE)
+                            as? InputMethodManager
+                        inputMethodManager?.showSoftInput(nameInput, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
             }
         }
 
@@ -2427,9 +2435,6 @@ class GameMenu(
      * 构建普通菜单选项
      */
     private fun buildNormalMenuOptions(normalOptions: MutableList<MenuOption>) {
-        normalOptions.add(MenuOption(getString(R.string.game_menu_toggle_keyboard), true,
-            { game.toggleKeyboard() }, "game_menu_toggle_keyboard", true))
-
         normalOptions.add(MenuOption(getString(R.string.game_menu_toggle_host_keyboard), true,
             { sendKeys(shortArrayOf(KeyboardTranslator.VK_LWIN.s(), KeyboardTranslator.VK_LCONTROL.s(), KeyboardTranslator.VK_O.s())) },
             "game_menu_toggle_host_keyboard", true))
@@ -2608,7 +2613,6 @@ class GameMenu(
         private val ICON_MAP = mapOf(
             "microphone_input" to R.drawable.ic_mic_gm,
             "game_menu_change_resolution" to R.drawable.ic_resolution_cute,
-            "game_menu_toggle_keyboard" to R.drawable.ic_candy_keyboard,
             "game_menu_toggle_performance_overlay" to R.drawable.ic_candy_performance,
             "game_menu_perf_overlay_style" to R.drawable.ic_candy_performance,
             "game_menu_toggle_virtual_controller" to R.drawable.ic_candy_controller,

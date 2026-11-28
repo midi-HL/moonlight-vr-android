@@ -3,7 +3,7 @@ package com.limelight.preferences
 import android.content.Context
 import androidx.preference.Preference
 import android.util.AttributeSet
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import com.limelight.LimeLog
 import com.limelight.R

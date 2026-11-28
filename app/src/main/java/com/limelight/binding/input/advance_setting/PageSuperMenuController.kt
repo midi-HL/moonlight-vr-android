@@ -4,7 +4,7 @@ import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.LinearLayout
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import com.limelight.Game
 import com.limelight.R

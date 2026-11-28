@@ -13,7 +13,7 @@ import android.os.Build
 import android.os.VibratorManager
 import android.view.InputDevice
 import android.view.MotionEvent
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import com.limelight.LimeLog
 import com.limelight.gamemenu.GameMenu

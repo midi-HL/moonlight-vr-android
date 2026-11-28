@@ -13,7 +13,7 @@ import android.widget.ImageView
 import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.PreferenceDialogFragmentCompat

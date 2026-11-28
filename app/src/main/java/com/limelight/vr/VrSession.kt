@@ -22,7 +22,9 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
 import android.widget.PopupWindow
+import android.view.inputmethod.InputMethodManager
 import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.annotation.RequiresApi
@@ -49,6 +51,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     // Paused Activities can still be visible during a window transition. Their projection remains
     // attached until onStop, but only the resumed host owns capture/input callbacks.
     private val hosts = LinkedHashMap<Activity, VrOverlayHost>()
+    private val imeWindowFlags = WeakHashMap<Window, VrImeWindowFlagState>()
     private var systemBackRegistration: SystemBackRegistration? = null
     private val attached = AtomicBoolean(false)
 
@@ -113,7 +116,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
         val game = activeActivity as? com.limelight.Game
         if (value.enabled && !enabled && game?.canEnterVrDuringStream() == false) {
-            android.widget.Toast.makeText(game, com.limelight.R.string.vr_restart_stream, android.widget.Toast.LENGTH_LONG).show()
+            com.limelight.utils.VrToast.makeText(game, com.limelight.R.string.vr_restart_stream, com.limelight.utils.VrToast.LENGTH_LONG).show()
             return value.copy(enabled = false)
         }
         return value
@@ -132,6 +135,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
             setPanelOpen(false)
             restoreAllWindows()
         }
+        if (!wasEnabled && enabled) {
+            com.limelight.utils.VrToast.dismissAll()
+            syncLocalImeWindowPolicy()
+            hideLocalImeFromVrWindows()
+        }
         refreshHosts()
         Log.i(TAG, "updateSettings: enabled=$enabled scale=${clean.screenScale}")
     }
@@ -143,7 +151,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         }
         val game = activeActivity as? com.limelight.Game
         if (value && !enabled && game?.canEnterVrDuringStream() == false) {
-            android.widget.Toast.makeText(game, com.limelight.R.string.vr_restart_stream, android.widget.Toast.LENGTH_LONG).show()
+            com.limelight.utils.VrToast.makeText(game, com.limelight.R.string.vr_restart_stream, com.limelight.utils.VrToast.LENGTH_LONG).show()
             return
         }
         updateSettings(context, settings.copy(enabled = value))
@@ -157,8 +165,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
             if (!enabled || !isCurrent()) return@post
             val context = activeActivity ?: app ?: return@post
             updateSettings(context, settings.copy(enabled = false))
-            android.widget.Toast.makeText(context, com.limelight.R.string.vr_surface_failed,
-                android.widget.Toast.LENGTH_LONG).show()
+            com.limelight.utils.VrToast.makeText(context, com.limelight.R.string.vr_surface_failed,
+                com.limelight.utils.VrToast.LENGTH_LONG).show()
         }
     }
 
@@ -305,6 +313,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     fun registerDialog(dialog: Dialog) {
         val window = dialog.window ?: return
         val owner = dialog.ownerActivity ?: findActivity(dialog.context) ?: return
+        applyLocalImeWindowPolicy(window, enabled)
+        if (enabled) hideLocalIme(window)
         val decor = window.decorView
         if (window.callback !is VrActivityHooks) {
             window.callback = VrActivityHooks(owner, window.callback ?: dialog, inDialog = true,
@@ -378,6 +388,40 @@ object VrSession : Application.ActivityLifecycleCallbacks {
 
     private fun restoreFloatingWindows(owner: Activity) {
         dialogDecors.filter { it.owner.get() === owner }.forEach { updateFloatingWindow(it, forceVisible = true) }
+    }
+
+    /** Keep native Android IME windows out of the scene whenever their Activity is projected. */
+    private fun syncLocalImeWindowPolicy() {
+        val activities = (hosts.keys + listOfNotNull(activeActivity)).distinct()
+        activities.forEach { activity -> applyLocalImeWindowPolicy(activity.window, enabled) }
+        dialogDecors.toList().forEach { entry ->
+            val owner = entry.owner.get() ?: return@forEach
+            val window = entry.window?.get() ?: return@forEach
+            if (owner in activities) applyLocalImeWindowPolicy(window, enabled)
+        }
+    }
+
+    private fun applyLocalImeWindowPolicy(window: Window, shouldBlockIme: Boolean) {
+        val state = imeWindowFlags.getOrPut(window) { VrImeWindowFlagState() }
+        val attributes = window.attributes
+        val nextFlags = state.apply(
+            attributes.flags, shouldBlockIme, WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+        )
+        if (nextFlags != attributes.flags) {
+            attributes.flags = nextFlags
+            window.attributes = attributes
+        }
+        if (!shouldBlockIme) imeWindowFlags.remove(window)
+    }
+
+    private fun hideLocalImeFromVrWindows() {
+        imeWindowFlags.keys.toList().forEach(::hideLocalIme)
+    }
+
+    private fun hideLocalIme(window: Window) {
+        val focused = window.decorView.findFocus() ?: window.currentFocus ?: window.decorView
+        (focused.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(focused.windowToken, 0)
     }
 
     fun activeDialogDecors(source: View): List<View> = dialogDecors.mapNotNull { entry ->
@@ -500,6 +544,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun refreshHosts() {
+        syncLocalImeWindowPolicy()
         if (!enabled) {
             releaseAllHosts()
         } else activeActivity?.let { activity ->
@@ -531,8 +576,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     private fun showWindowRequirement(activity: Activity) {
-        android.widget.Toast.makeText(activity, com.limelight.R.string.vr_fullscreen_landscape_required,
-            android.widget.Toast.LENGTH_LONG).show()
+        com.limelight.utils.VrToast.makeText(activity, com.limelight.R.string.vr_fullscreen_landscape_required,
+            com.limelight.utils.VrToast.LENGTH_LONG).show()
     }
 
     private fun onHostWindowChanged(activity: Activity) {
@@ -644,6 +689,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         if (delegate !is VrActivityHooks) {
             window.callback = VrActivityHooks(activity, delegate)
         }
+        applyLocalImeWindowPolicy(window, enabled)
         // Cover the destination before its first draw. An orientation request is asynchronous;
         // the host waits for the actual landscape layout before constructing Cardboard.
         if (enabled) {
@@ -669,8 +715,8 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         // Another screen may have enabled VR while this stream was kept alive in the background.
         // Recheck the settled Game presentation path before creating its stereo surface.
         if (enabled && activity is com.limelight.Game && !activity.canEnterVrDuringStream()) {
-            android.widget.Toast.makeText(activity, com.limelight.R.string.vr_restart_stream,
-                android.widget.Toast.LENGTH_LONG).show()
+            com.limelight.utils.VrToast.makeText(activity, com.limelight.R.string.vr_restart_stream,
+                com.limelight.utils.VrToast.LENGTH_LONG).show()
             updateSettings(activity, settings.copy(enabled = false))
             return
         }
@@ -706,6 +752,7 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         onActivityPaused(activity)
         releaseHost(activity)
         restoreFloatingWindows(activity)
+        imeWindowFlags.remove(activity.window)
         dialogDecors.removeAll { it.owner.get() == null || it.owner.get() === activity }
         windowStates.remove(activity)
     }

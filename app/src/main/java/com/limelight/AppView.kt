@@ -36,7 +36,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf

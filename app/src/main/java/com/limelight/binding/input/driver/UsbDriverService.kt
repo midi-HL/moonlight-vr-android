@@ -16,7 +16,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.view.InputDevice
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.utils.CompletionSignal
 import kotlin.concurrent.withLock
 

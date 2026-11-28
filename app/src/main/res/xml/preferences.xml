@@ -1187,7 +1187,7 @@
                     android:summary="@string/summary_float_ball_single_click_action"
                     android:entries="@array/float_ball_action_names"
                     android:entryValues="@array/float_ball_action_values"
-                    android:defaultValue="open_keyboard" />
+                    android:defaultValue="open_menu" />
                 <ListPreference
                     android:key="list_float_ball_double_click_action"
                     android:dependency="checkbox_enable_float_ball"

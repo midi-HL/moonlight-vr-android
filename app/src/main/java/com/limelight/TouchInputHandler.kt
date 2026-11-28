@@ -10,7 +10,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.annotation.RequiresApi
 import com.limelight.binding.input.touch.AbsoluteTouchContext
 import com.limelight.binding.input.touch.EnhancedTouchGestureRouteOwner

@@ -29,7 +29,7 @@ import android.widget.RadioButton;
 import android.app.AlertDialog;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
+import com.limelight.utils.VrToast;
 import androidx.appcompat.widget.SwitchCompat;
 import com.limelight.utils.AppSwitchStyle;
 
@@ -119,7 +119,7 @@ public class ElementController {
     private final Context context;
     private final Game game;
     private final Handler handler;
-    private Toast currentToast;
+    private VrToast currentToast;
     private final DirectConfigSwitchState directConfigSwitch = new DirectConfigSwitchState();
     private Element dispatchingElement;
 
@@ -253,7 +253,7 @@ public class ElementController {
         if (currentToast != null) {
             currentToast.cancel();
         }
-        currentToast = Toast.makeText(context, message, Toast.LENGTH_SHORT);
+        currentToast = VrToast.makeText(context, message, VrToast.LENGTH_SHORT);
         currentToast.show();
     }
 
@@ -871,7 +871,7 @@ public class ElementController {
 
     private void applyCrownAutoColors(Element element, SuperPageLayout page) {
         if (!(context instanceof Game)) {
-            Toast.makeText(context, R.string.crown_auto_color_no_frame, Toast.LENGTH_SHORT).show();
+            VrToast.makeText(context, R.string.crown_auto_color_no_frame, VrToast.LENGTH_SHORT).show();
             return;
         }
 
@@ -879,22 +879,22 @@ public class ElementController {
             @Override
             public void onPalette(CrownAutoColorPalette palette) {
                 if (element.applyCrownAutoColors(palette, page)) {
-                    Toast.makeText(context, R.string.crown_auto_color_done, Toast.LENGTH_SHORT).show();
+                    VrToast.makeText(context, R.string.crown_auto_color_done, VrToast.LENGTH_SHORT).show();
                 } else {
-                    Toast.makeText(context, R.string.crown_auto_color_failed, Toast.LENGTH_SHORT).show();
+                    VrToast.makeText(context, R.string.crown_auto_color_failed, VrToast.LENGTH_SHORT).show();
                 }
             }
 
             @Override
             public void onError(String message) {
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+                VrToast.makeText(context, message, VrToast.LENGTH_SHORT).show();
             }
         });
     }
 
     private void applyCrownAutoColorsToAll() {
         if (!(context instanceof Game)) {
-            Toast.makeText(context, R.string.crown_auto_color_no_frame, Toast.LENGTH_SHORT).show();
+            VrToast.makeText(context, R.string.crown_auto_color_no_frame, VrToast.LENGTH_SHORT).show();
             return;
         }
 
@@ -912,19 +912,19 @@ public class ElementController {
                 }
 
                 if (appliedCount > 0) {
-                    Toast.makeText(
+                    VrToast.makeText(
                             context,
                             context.getString(R.string.crown_auto_color_all_done, appliedCount),
-                            Toast.LENGTH_SHORT
+                            VrToast.LENGTH_SHORT
                     ).show();
                 } else {
-                    Toast.makeText(context, R.string.crown_auto_color_no_supported_elements, Toast.LENGTH_SHORT).show();
+                    VrToast.makeText(context, R.string.crown_auto_color_no_supported_elements, VrToast.LENGTH_SHORT).show();
                 }
             }
 
             @Override
             public void onError(String message) {
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+                VrToast.makeText(context, message, VrToast.LENGTH_SHORT).show();
             }
         });
     }
@@ -1600,7 +1600,7 @@ public class ElementController {
                                 .show();
                         AppDialogStyler.INSTANCE.applySystemChoiceList(dialog, context);
                     } catch (Exception e) {
-                        Toast.makeText(context, R.string.toast_config_list_load_failed, Toast.LENGTH_SHORT).show();
+                        VrToast.makeText(context, R.string.toast_config_list_load_failed, VrToast.LENGTH_SHORT).show();
                     }
                 }
 
@@ -1613,9 +1613,9 @@ public class ElementController {
                 @Override
                 public void sendEvent(boolean down) {
                     if (down) {
-                        Toast.makeText(game,
+                        VrToast.makeText(game,
                                 game.getisTouchOverrideEnabled() ? R.string.toast_pan_zoom_disabled_short : R.string.toast_pan_zoom_enabled_short,
-                                Toast.LENGTH_SHORT).show();
+                                VrToast.LENGTH_SHORT).show();
                         game.setisTouchOverrideEnabled(!game.getisTouchOverrideEnabled());
                     }
                 }

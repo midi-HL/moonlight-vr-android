@@ -2,7 +2,7 @@ package com.limelight.unlock
 
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import com.limelight.Game
 import com.limelight.R
 import java.util.Arrays

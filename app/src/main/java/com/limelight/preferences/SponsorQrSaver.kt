@@ -12,7 +12,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.limelight.R

@@ -1,7 +1,7 @@
 package com.limelight.gamemenu
 
 import android.content.Context
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
 import com.limelight.DisplayReconnectSettings

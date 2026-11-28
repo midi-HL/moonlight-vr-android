@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.AttributeSet
-import android.widget.Toast
+import com.limelight.utils.VrToast as Toast
 
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat

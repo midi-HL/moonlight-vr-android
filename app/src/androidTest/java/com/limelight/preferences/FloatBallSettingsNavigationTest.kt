@@ -115,6 +115,16 @@ class FloatBallSettingsNavigationTest {
     }
 
     @Test
+    fun removedBuiltInKeyboardActionMigratesSavedChoiceAndIsNotOffered() {
+        assertEquals("open_menu", preferences.getString(SINGLE_CLICK_KEY, null))
+        settings.withFragment { fragment ->
+            val preference = requireNotNull(fragment.findPreference<ListPreference>(SINGLE_CLICK_KEY))
+            assertFalse("The removed built-in keyboard must not remain selectable",
+                preference.entryValues.any { it.toString() == "open_keyboard" })
+        }
+    }
+
+    @Test
     fun searchingNestedTitleOrActionOptionFocusesItsRowWithoutOpeningItsSheet() {
         val queries = mutableListOf<String>()
         settings.withFragment { fragment ->
@@ -185,19 +195,19 @@ class FloatBallSettingsNavigationTest {
     fun confirmedActionAndCurrentChoiceSurviveRotationInsideTheSameSettingsActivity() {
         settings.openScreen(SCREEN_KEY, SINGLE_CLICK_KEY)
         settings.assertFocusedPreference(SINGLE_CLICK_KEY)
-        val labels = openList(SINGLE_CLICK_KEY, "open_keyboard", "open_menu")
+        val labels = openList(SINGLE_CLICK_KEY, "open_menu", "toggle_visibility")
         repeat(labels.distance) { settings.press(KeyEvent.KEYCODE_DPAD_DOWN) }
         compose.onNodeWithText(labels.target).assertIsFocused()
         settings.press(KeyEvent.KEYCODE_BUTTON_A)
-        assertEquals("open_menu", preferences.getString(SINGLE_CLICK_KEY, null))
+        assertEquals("toggle_visibility", preferences.getString(SINGLE_CLICK_KEY, null))
         settings.assertFocusedPreference(SINGLE_CLICK_KEY)
 
         settings.rotate()
 
         settings.awaitScreen(SCREEN_KEY)
-        assertEquals("open_menu", preferences.getString(SINGLE_CLICK_KEY, null))
+        assertEquals("toggle_visibility", preferences.getString(SINGLE_CLICK_KEY, null))
         settings.withFragment { fragment ->
-            assertEquals("open_menu", requireNotNull(fragment.findPreference<ListPreference>(SINGLE_CLICK_KEY)).value)
+            assertEquals("toggle_visibility", requireNotNull(fragment.findPreference<ListPreference>(SINGLE_CLICK_KEY)).value)
         }
         settings.focusPreference(SINGLE_CLICK_KEY)
         settings.press(KeyEvent.KEYCODE_BUTTON_A)
