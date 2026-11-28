@@ -12,6 +12,7 @@ object VrKeys {
     const val ACTION_UP = 1
 
     const val BACK = 4
+    const val MENU = 82
     const val ENTER = 66
     const val DPAD_UP = 19
     const val DPAD_DOWN = 20

@@ -74,6 +74,22 @@ object VrMatrix4 {
      */
     const val IPD_SHIFT_GAIN = 0.08f
 
+    /** Keep head-relative controls inside the view while the final stereo image is zoomed.
+     * Scale clip x/y, including off-axis projection offsets, without changing clip z/w.
+     * Lens distortion follows this transform, so it preserves visibility rather than an exact
+     * pixel size. A failed final-frame copy leaves the controls smaller, inside their 1x bounds.
+     */
+    fun compensateZoomInto(out: FloatArray, zoomScale: Float): FloatArray {
+        require(out.size == SIZE) { "4x4 matrix required" }
+        if (zoomScale <= 1.001f) return out
+        val inverse = 1f / zoomScale
+        for (column in 0..3) {
+            out[column * 4] *= inverse
+            out[column * 4 + 1] *= inverse
+        }
+        return out
+    }
+
     /**
      * Applies an EFFECTIVE interpupillary-distance adjustment to a finished per-eye MVP matrix.
      *

@@ -7,6 +7,35 @@ import org.junit.Test
 
 class VrRenderingMathTest {
     @Test
+    fun panelCompensationIncludesOffAxisOffsetsAndPreservesDepth() {
+        // Asymmetric per-eye projection must shrink about that eye's optical centre.
+        val original = floatArrayOf(2f, .2f, .3f, .4f, .5f, 3f, .7f, .8f,
+            .9f, 1f, 1.1f, -1f, 1.3f, 1.4f, 1.5f, 1.6f)
+        for (zoom in floatArrayOf(1f, 1.35f, 2.5f)) {
+            val compensated = VrMatrix4.compensateZoomInto(original.copyOf(), zoom)
+            for (column in 0..3) {
+                assertEquals(original[column * 4], compensated[column * 4] * zoom, .000001f)
+                assertEquals(original[column * 4 + 1], compensated[column * 4 + 1] * zoom, .000001f)
+                assertEquals(original[column * 4 + 2], compensated[column * 4 + 2], 0f)
+                assertEquals(original[column * 4 + 3], compensated[column * 4 + 3], 0f)
+            }
+        }
+        assertArrayEquals(original, VrMatrix4.compensateZoomInto(original.copyOf(), 1f), 0f)
+    }
+
+    @Test
+    fun failedZoomCopyKeepsCompensatedPanelInsideItsUnzoomedBounds() {
+        val projection = VrMatrix4.identity()
+        val compensated = VrMatrix4.compensateZoomInto(projection.copyOf(), 2.5f)
+        for (x in floatArrayOf(-.8f, .8f)) for (y in floatArrayOf(-.7f, .7f)) {
+            assertTrue(kotlin.math.abs(compensated[0] * x) <= kotlin.math.abs(x))
+            assertTrue(kotlin.math.abs(compensated[5] * y) <= kotlin.math.abs(y))
+        }
+        assertEquals(.4f, compensated[0], .000001f)
+        assertEquals(.4f, compensated[5], .000001f)
+    }
+
+    @Test
     fun bitmapTopRowStaysAtTopWhenVideoIsFlipped() {
         val mesh = VrScreenGeometry.build(1f, 2f, 0f, 0f, 16f / 9f)
         val bitmapCoords = floatArrayOf(0f, 1f, 0f, 0f, 1f, 1f, 1f, 0f)

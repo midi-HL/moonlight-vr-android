@@ -10,6 +10,8 @@ import android.util.Log
 import android.view.View
 import kotlin.math.roundToInt
 
+internal data class VrPanelCaptureFrame(val bitmap: Bitmap, val generation: Long)
+
 /** Captures the application and quick controls separately for the GL thread. */
 class VrWindowCapture(
     private val source: View,
@@ -26,6 +28,7 @@ class VrWindowCapture(
     private var lastPanelSettings: VrSettings? = null
     private var lastPanelIndex = -1
     private var lastPanelEditing = false
+    private var lastPanelGeneration = -1L
     private var reportedDrawFailure = false
 
     private val tick = object : Runnable {
@@ -80,7 +83,7 @@ class VrWindowCapture(
     }
 
     fun consume(): Bitmap? = sceneFrames.consume()
-    fun consumePanel(): Bitmap? = panelFrames.consume()
+    internal fun consumePanel(): VrPanelCaptureFrame? = panelFrames.consumePanel()
     fun returnScene(bitmap: Bitmap) = sceneFrames.giveBack(bitmap)
     fun returnPanel(bitmap: Bitmap) = panelFrames.giveBack(bitmap)
 
@@ -125,28 +128,33 @@ class VrWindowCapture(
     }
 
     private fun capturePanel() {
-        if (!VrSession.panelOpen) {
+        val state = VrSession.panelSnapshot
+        if (!state.open) {
             lastPanelSettings = null
             return
         }
         val settings = VrSession.settings
         val index = VrSession.selectedIndex
         val editing = VrSession.editing
-        if (settings == lastPanelSettings && index == lastPanelIndex && editing == lastPanelEditing) return
+        if (settings == lastPanelSettings && index == lastPanelIndex && editing == lastPanelEditing &&
+            state.generation == lastPanelGeneration) return
         val bitmap = panelFrames.obtain(PANEL_WIDTH, PANEL_HEIGHT)
         val canvas = Canvas(bitmap)
         canvas.drawColor(0, PorterDuff.Mode.CLEAR)
         panel.layoutFor(PANEL_WIDTH, PANEL_HEIGHT)
         panel.drawInto(canvas, settings, index, editing)
-        panelFrames.publish(bitmap)
+        panelFrames.publish(bitmap, state.generation)
         lastPanelSettings = settings
         lastPanelIndex = index
         lastPanelEditing = editing
+        lastPanelGeneration = state.generation
     }
 
     // Each bitmap is owned by just one thread. GL returns it after the upload.
     private class Frames {
-        private var pending: Bitmap? = null
+        private data class PendingFrame(val bitmap: Bitmap, val panelGeneration: Long?)
+
+        private var pending: PendingFrame? = null
         private var reusable: Bitmap? = null
         private var closed = false
 
@@ -160,12 +168,19 @@ class VrWindowCapture(
             return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         }
 
-        @Synchronized fun publish(bitmap: Bitmap) {
-            pending?.let(::giveBack)
-            pending = bitmap
+        @Synchronized fun publish(bitmap: Bitmap, panelGeneration: Long? = null) {
+            pending?.let { giveBack(it.bitmap) }
+            pending = PendingFrame(bitmap, panelGeneration)
         }
 
-        @Synchronized fun consume(): Bitmap? = pending.also { pending = null }
+        @Synchronized fun consume(): Bitmap? = pending.also { pending = null }?.bitmap
+
+        @Synchronized fun consumePanel(): VrPanelCaptureFrame? {
+            val frame = pending ?: return null
+            pending = null
+            val generation = checkNotNull(frame.panelGeneration) { "Panel frame is missing its generation" }
+            return VrPanelCaptureFrame(frame.bitmap, generation)
+        }
 
         @Synchronized fun giveBack(bitmap: Bitmap) {
             if (closed) bitmap.recycle() else {
@@ -175,13 +190,13 @@ class VrWindowCapture(
         }
 
         @Synchronized fun dropPending() {
-            pending?.let(::giveBack)
+            pending?.let { giveBack(it.bitmap) }
             pending = null
         }
 
         @Synchronized fun close() {
             closed = true
-            pending?.recycle()
+            pending?.bitmap?.recycle()
             reusable?.recycle()
             pending = null
             reusable = null

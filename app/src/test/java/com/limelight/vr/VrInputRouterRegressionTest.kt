@@ -114,6 +114,64 @@ class VrInputRouterRegressionTest {
     }
 
     @Test
+    fun menuAliasUsesStartSelectChordStateOnlyForGamepads() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1000L))
+        // The production Session has already normalized the controller BACK alias to SELECT.
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1001L))
+        assertEquals(VrGamepadRouter.Command.TogglePanel, router.onMenuHoldElapsed())
+        router.panelOpen = true
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 1, isRepeat = true, downTime = 1001L))
+        assertEquals(VrGamepadRouter.Command.CancelMenuHold, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1001L))
+        // The first DOWN already reached the stream, so its matching UP must still do so.
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.ClosePanel, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1100L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_UP, true, deviceId = 1, downTime = 1100L))
+
+        val keyboardRouter = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.PassThrough, keyboardRouter.onKey(
+            VrKeys.MENU, VrKeys.ACTION_DOWN, false, deviceId = 1, downTime = 2000L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, keyboardRouter.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 2001L))
+        assertNull(keyboardRouter.onMenuHoldElapsed())
+    }
+
+    @Test
+    fun menuAliasCannotCompleteASelectChordOnAnotherController() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.PassThrough, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 2, downTime = 1001L))
+        assertNull(router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 1, downTime = 1002L))
+        assertEquals(VrGamepadRouter.Command.TogglePanel, router.onMenuHoldElapsed())
+    }
+
+    @Test
+    fun menuAliasRetainsUiWindowOwnershipAcrossCancellation() {
+        val router = VrGamepadRouter().apply { vrEnabled = true }
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_DOWN, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.ArmMenuHold, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_DOWN, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1001L))
+        router.cancelWindowInput()
+        assertNull(router.onMenuHoldElapsed())
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(
+            VrKeys.MENU, VrKeys.ACTION_UP, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1000L))
+        assertEquals(VrGamepadRouter.Command.Consumed, router.onKey(
+            VrKeys.BUTTON_SELECT, VrKeys.ACTION_UP, true, deviceId = 1, captureUiMenuKeys = true, downTime = 1001L))
+    }
+
+    @Test
     fun heldHatRepeatsAtTheSameCadenceAsHeldStickInNativeUi() {
         val router = VrGamepadRouter().apply { vrEnabled = true }
         assertTrue(router.onUiNavigation(0f, 0f, 0f, 1f, 1000L))

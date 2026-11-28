@@ -56,8 +56,11 @@ object VrSession : Application.ActivityLifecycleCallbacks {
         private set
     @Volatile var enabled: Boolean = false
         private set
-    @Volatile var panelOpen: Boolean = false
-        private set
+    internal data class PanelState(val open: Boolean, val generation: Long)
+
+    @Volatile private var panelState = PanelState(open = false, generation = 0L)
+    val panelOpen: Boolean get() = panelState.open
+    internal val panelSnapshot: PanelState get() = panelState
     @Volatile var selectedIndex: Int = 0
         private set
     @Volatile var editing: Boolean = false
@@ -187,16 +190,17 @@ object VrSession : Application.ActivityLifecycleCallbacks {
     }
 
     fun setPanelOpen(value: Boolean) {
-        if (panelOpen == value) return
+        val previous = panelState
+        if (previous.open == value) return
         VrInputDispatcher.cancelNativeWindows()
-        panelOpen = value
         router.panelOpen = value
         editing = false
         router.editing = false
         router.resetAxisHold()
         if (value) driverSnapshots.beginCapture()
-        (activeActivity as? com.limelight.Game)?.onVrPanelChanged(value)
         if (!value) selectedIndex = 0
+        panelState = PanelState(value, if (value) previous.generation + 1L else previous.generation)
+        (activeActivity as? com.limelight.Game)?.onVrPanelChanged(value)
         refreshHosts()
     }
 

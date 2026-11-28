@@ -103,6 +103,7 @@ class VrTheaterRenderer(
     private var quickPanelTextureWidth = 0
     private var quickPanelTextureHeight = 0
     private var hasQuickPanelFrame = false
+    private var uploadedPanelGeneration = -1L
     private var hasVideoFrame = false
 
     private val quickPanelMesh = VrScreenGeometry.build(
@@ -122,6 +123,7 @@ class VrTheaterRenderer(
     private var meshDirty = true
     private var frameSettings = VrSession.settings
     private var framePanelOpen = false
+    private var framePanelGeneration = 0L
 
     private val headQuaternion = FloatArray(4)
     private val nextHeadQuaternion = FloatArray(4)
@@ -173,6 +175,7 @@ class VrTheaterRenderer(
         quickPanelTextureWidth = 0
         quickPanelTextureHeight = 0
         hasQuickPanelFrame = false
+        uploadedPanelGeneration = -1L
         vertexCount = 0
         videoVertexCount = 0
         whiteTex = 0
@@ -245,7 +248,9 @@ class VrTheaterRenderer(
     override fun onNewFrame(headTransform: HeadTransform) {
         // Both eyes and final composition must use one settings snapshot.
         frameSettings = VrSession.settings
-        framePanelOpen = VrSession.panelOpen
+        val panelSnapshot = VrSession.panelSnapshot
+        framePanelOpen = panelSnapshot.open
+        framePanelGeneration = panelSnapshot.generation
         headTransform.getQuaternion(nextHeadQuaternion, 0)
         val x = nextHeadQuaternion[0]
         val y = nextHeadQuaternion[1]
@@ -270,14 +275,15 @@ class VrTheaterRenderer(
                 capture.returnScene(bitmap)
             }
         }
-        capture.consumePanel()?.let { bitmap ->
+        capture.consumePanel()?.let { frame ->
             try {
-                if (quickPanelTextureId != 0) uploadQuickPanel(bitmap)
+                if (quickPanelTextureId != 0) uploadQuickPanel(frame)
             } finally {
-                capture.returnPanel(bitmap)
+                capture.returnPanel(frame.bitmap)
             }
         }
-        if (!framePanelOpen) hasQuickPanelFrame = false
+        // A panel bitmap may arrive after this frame snapshotted panelOpen=false. Keep its
+        // uploaded texture ready for the next frame; visibility is gated in onDrawEye.
         if (isVideoHost && VrVideoSurfaceRegistry.consumeFrameAvailable(this)) {
             val texture = videoSurfaceTexture ?: return
             try {
@@ -353,8 +359,12 @@ class VrTheaterRenderer(
             }
         }
 
-        if (framePanelOpen && hasQuickPanelFrame && panelProgram != null) {
+        if (isQuickPanelFrameVisible() && panelProgram != null) {
             VrMatrix4.multiplyInto(mvpMatrix, projection, eyeFromHead)
+            // Final-frame zoom also runs while the controls are open. Counter-scale only
+            // the controls so the scene never changes size when opening/closing them.
+            // If framebuffer copying fails, this leaves a smaller, still visible panel.
+            VrMatrix4.compensateZoomInto(mvpMatrix, s.zoomScale)
             enableBitmapBlending()
             drawQuad(panelProgram, mvpMatrix, 1f, GLES20.GL_TEXTURE_2D, quickPanelTextureId,
                 quickPanelPositions, quickPanelTexCoords, quickPanelMesh.vertexCount)
@@ -416,11 +426,16 @@ class VrTheaterRenderer(
         }
     }
 
-    private fun uploadQuickPanel(bitmap: Bitmap) {
+    internal fun isQuickPanelFrameVisible(): Boolean = framePanelOpen && hasQuickPanelFrame &&
+        uploadedPanelGeneration == framePanelGeneration
+
+    private fun uploadQuickPanel(frame: VrPanelCaptureFrame) {
+        val bitmap = frame.bitmap
         val changed = bitmap.width != quickPanelTextureWidth || bitmap.height != quickPanelTextureHeight
         if (!uploadBitmap(quickPanelTextureId, bitmap, changed)) return
         quickPanelTextureWidth = bitmap.width
         quickPanelTextureHeight = bitmap.height
+        uploadedPanelGeneration = frame.generation
         hasQuickPanelFrame = true
     }
 
@@ -485,7 +500,7 @@ class VrTheaterRenderer(
      */
     override fun onFinishFrame(viewport: Viewport) {
         val s = frameSettings
-        if (s.zoomScale > 1.001f && !framePanelOpen) {
+        if (s.zoomScale > 1.001f) {
             drawZoomFill(viewport, s.zoomScale)
         }
         // P-D8: the fixed screen-space line is drawn LAST, never scaled.
@@ -678,6 +693,7 @@ class VrTheaterRenderer(
         video = null
         capture.releasePending()
         hasQuickPanelFrame = false
+        uploadedPanelGeneration = -1L
         hasVideoFrame = false
     }
 }

@@ -95,7 +95,10 @@ class VrGamepadRouter {
         captureUiMenuKeys: Boolean = false,
         downTime: Long? = null,
     ): Command {
-        val button = Button(deviceId, keyCode)
+        // Some Android gamepads use MENU for START. Match the stream controller mapping,
+        // and normalize before tracking so DOWN and UP retain the same ownership.
+        val normalizedKeyCode = if (isGamepadSource && keyCode == VrKeys.MENU) VrKeys.BUTTON_START else keyCode
+        val button = Button(deviceId, normalizedKeyCode)
         if (action == VrKeys.ACTION_UP) {
             val currentTime = pressTimes[button]
             if (downTime != null && currentTime != null && currentTime != downTime) {
@@ -138,7 +141,7 @@ class VrGamepadRouter {
                 return if (panelOpen) Command.Consumed else Command.PassThrough
             }
             // Direction repeats are useful. Confirmation and dismissal must be fresh presses.
-            return if (panelOpen) when (keyCode) {
+            return if (panelOpen) when (normalizedKeyCode) {
                 VrKeys.DPAD_UP -> if (editing) Command.Adjust(-1) else Command.Move(-1)
                 VrKeys.DPAD_DOWN -> if (editing) Command.Adjust(1) else Command.Move(1)
                 VrKeys.DPAD_LEFT -> Command.Adjust(-1)
@@ -150,7 +153,7 @@ class VrGamepadRouter {
         if (downTime != null) pressTimes[button] = downTime
 
         if (!vrEnabled) {
-            val shoulder = keyCode == VrKeys.BUTTON_L1 || keyCode == VrKeys.BUTTON_R1
+            val shoulder = normalizedKeyCode == VrKeys.BUTTON_L1 || normalizedKeyCode == VrKeys.BUTTON_R1
             if (shoulder && isPressed(deviceId, VrKeys.BUTTON_L1) && isPressed(deviceId, VrKeys.BUTTON_R1)) {
                 captured.add(button)
                 return Command.ToggleVr
@@ -161,8 +164,8 @@ class VrGamepadRouter {
         // START has an Android DPAD_CENTER fallback; SELECT/MODE fall back to MENU/HOME.
         // UI windows reserve these keys from their first DOWN, while live Game retains
         // short START/SELECT input. UP ownership stays with the original DOWN context.
-        val capturedUiMenuKey = captureUiMenuKeys && (keyCode == VrKeys.BUTTON_START ||
-            keyCode == VrKeys.BUTTON_SELECT || keyCode == VrKeys.BUTTON_MODE)
+        val capturedUiMenuKey = captureUiMenuKeys && (normalizedKeyCode == VrKeys.BUTTON_START ||
+            normalizedKeyCode == VrKeys.BUTTON_SELECT || normalizedKeyCode == VrKeys.BUTTON_MODE)
         if (capturedUiMenuKey) captured.add(button)
 
         // START+SELECT / HOME: arm the long-press on the DOWN edge that completes it.
@@ -173,7 +176,7 @@ class VrGamepadRouter {
         }
         if (panelOpen) {
             captured.add(button)
-            return when (keyCode) {
+            return when (normalizedKeyCode) {
                 VrKeys.DPAD_UP -> if (editing) Command.Adjust(-1) else Command.Move(-1)
                 VrKeys.DPAD_DOWN -> if (editing) Command.Adjust(1) else Command.Move(1)
                 VrKeys.DPAD_LEFT -> Command.Adjust(-1)

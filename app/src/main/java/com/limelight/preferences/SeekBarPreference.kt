@@ -99,7 +99,11 @@ class SeekBarPreference(context: Context, attrs: AttributeSet) : DialogPreferenc
     }
 
     fun refreshCurrentValue() {
-        currentValue = getPersistedInt(defaultValue)
+        val persistedValue = getPersistedInt(defaultValue)
+        if (currentValue != persistedValue) {
+            currentValue = persistedValue
+            notifyChanged()
+        }
     }
 
     fun setProgress(progress: Int) {

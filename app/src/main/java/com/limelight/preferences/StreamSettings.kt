@@ -4021,6 +4021,7 @@ class StreamSettings : ThemedAppCompatActivity() {
 
         /** Reapplies preference presentation derived from the changed stored value. */
         private fun refreshSettingsPresentation(changedKey: String? = null) {
+            refreshVrPreferencePresentation(changedKey)
             if (changedKey == null || changedKey in setOf(
                     "list_ds5_simulation_mode", "list_host_gamepad_selection",
                     PreferenceConfiguration.GAME_RUMBLE_MODE_PREF_STRING,
@@ -4075,6 +4076,32 @@ class StreamSettings : ThemedAppCompatActivity() {
             }
             refreshFeaturePageVisibility(preferenceScreen)
             updateFeaturePageSummaries()
+        }
+
+        /** The quick panel writes the same store without going through these Preference objects. */
+        private fun refreshVrPreferencePresentation(changedKey: String?) {
+            if (changedKey != null && !com.limelight.vr.VrSettingsStore.isVrKey(changedKey)) return
+            val settings = com.limelight.vr.VrSettingsStore.load(requireContext())
+            fun refresh(preference: Preference) {
+                if (!com.limelight.vr.VrSettingsStore.isVrKey(preference.key)) return
+                when (preference) {
+                    is SeekBarPreference -> preference.refreshCurrentValue()
+                    is CheckBoxPreference -> when (preference.key) {
+                        com.limelight.vr.VrSettingsStore.K_ENABLED -> settings.enabled
+                        com.limelight.vr.VrSettingsStore.K_HEAD -> settings.headTrackingEnabled
+                        com.limelight.vr.VrSettingsStore.K_RECENTER -> settings.recenterOnEnter
+                        com.limelight.vr.VrSettingsStore.K_V_FLIP -> settings.verticalFlip
+                        com.limelight.vr.VrSettingsStore.K_ALIGN_LINE -> settings.showCenterAlignmentLine
+                        else -> null
+                    }?.let { preference.isChecked = it }
+                }
+            }
+            if (changedKey != null) {
+                findPreference<Preference>(changedKey)?.let(::refresh)
+            } else {
+                val category = findPreference<PreferenceGroup>("category_vr") ?: return
+                for (index in 0 until category.preferenceCount) refresh(category.getPreference(index))
+            }
         }
 
         private fun updateHapticsPreferences() {
