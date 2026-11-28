@@ -1,24 +1,26 @@
 package com.limelight.utils
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import com.limelight.vr.VrSession
-import java.util.Collections
-import java.util.WeakHashMap
 
 /** Toast facade that keeps transient system UI out of the stereoscopic VR scene. */
 class VrToast private constructor(private val delegate: Toast) {
     fun show() {
-        if (!VrToastPolicy.shouldShow(VrSession.enabled)) {
-            delegate.cancel()
-            return
+        synchronized(stateLock) {
+            if (!VrToastPolicy.shouldShow(VrSession.enabled)) {
+                delegate.cancel()
+                return
+            }
+            register(delegate, durationMillis)
+            delegate.show()
         }
-        activeToasts[delegate] = true
-        delegate.show()
     }
 
     fun cancel() {
-        activeToasts.remove(delegate)
+        unregister(delegate)
         delegate.cancel()
     }
 
@@ -37,13 +39,35 @@ class VrToast private constructor(private val delegate: Toast) {
         /** Cancel app-owned transient hints that were shown before VR was enabled. */
         @JvmStatic
         fun dismissAll() {
-            synchronized(activeToasts) {
-                activeToasts.keys.toList().forEach(Toast::cancel)
-                activeToasts.clear()
+            val toasts = synchronized(stateLock) { activeToasts.drain() }
+            toasts.forEach { (toast, cleanup) ->
+                handler.removeCallbacks(cleanup)
+                toast.cancel()
             }
         }
 
-        private val activeToasts = Collections.synchronizedMap(WeakHashMap<Toast, Boolean>())
+        private val handler = Handler(Looper.getMainLooper())
+        private val stateLock = Any()
+        private val durationMillis = 4_000L
+        // Toasts shown through this facade must stay strongly reachable until their
+        // display window expires, so enabling VR can reliably cancel every active one.
+        private val activeToasts = ActiveToastRegistry<Toast>()
+
+        private fun register(toast: Toast, timeoutMillis: Long) {
+            lateinit var cleanup: Runnable
+            cleanup = Runnable {
+                if (activeToasts.unregister(toast, cleanup)) {
+                    handler.removeCallbacks(cleanup)
+                }
+            }
+            activeToasts.register(toast, cleanup)?.let(handler::removeCallbacks)
+            handler.postDelayed(cleanup, timeoutMillis)
+        }
+
+        private fun unregister(toast: Toast) {
+            val cleanup = activeToasts.unregister(toast)
+            cleanup?.let(handler::removeCallbacks)
+        }
     }
 }
 
