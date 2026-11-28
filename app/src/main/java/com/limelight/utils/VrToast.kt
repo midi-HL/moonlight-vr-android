@@ -27,11 +27,11 @@ class VrToast private constructor(private val delegate: Toast) {
         const val LENGTH_LONG = Toast.LENGTH_LONG
 
         @JvmStatic
-        fun makeText(context: Context, text: CharSequence, duration: Int): VrToast =
+        fun makeText(context: Context?, text: CharSequence, duration: Int): VrToast =
             VrToast(Toast.makeText(context, text, duration))
 
         @JvmStatic
-        fun makeText(context: Context, resId: Int, duration: Int): VrToast =
+        fun makeText(context: Context?, resId: Int, duration: Int): VrToast =
             VrToast(Toast.makeText(context, resId, duration))
 
         /** Cancel app-owned transient hints that were shown before VR was enabled. */

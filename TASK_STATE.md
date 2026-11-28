@@ -10,10 +10,10 @@
 
 ## 实时核查与证据边界
 
-- 本轮实时 HEAD：6bd5c70badcf8870e8cae0de90b2be35e96f4a0d，分支 codex/vr-audit-modern-controls；工作区已有大量未提交改动，当前逐项保留并核对，禁止 reset/clean。
-- 仅完成源码静态读取和部分修复，尚未运行任何本轮 Gradle/JVM/lint/构建测试；本地 Gradle 禁止运行。
+- 本轮基线 HEAD：6bd5c70badcf8870e8cae0de90b2be35e96f4a0d；修复提交 befeea3153a6189d1062f9d81e586e0d0a8868ad 已推到 codex/vr-audit-modern-controls。
+- 匹配 SHA 的 Actions 46157675927 失败于 JVM Kotlin 编译。已据日志定位到 Toast facade nullable Context 兼容、Game.kt 漏导 VrSession 和 VrPanelView 旧颜色标识；三项已修正，待新 SHA 重跑。
 - 已有代码/测试候选：VrPanelView.kt、StreamSettings.kt、VrSession.kt、VrImeWindowFlagState.kt、VrToast.kt、相关 JVM/androidTest。必须以当前磁盘为准。
-- 已确认 45 个 Kotlin 文件曾有无效的双重 as Toast 导入，已改成单一 VrToast as Toast 并静态重查；仍需由 Actions 编译确认。
+- 已确认 45 个 Kotlin 文件曾有无效的双重 as Toast 导入，已改成单一 VrToast as Toast 并静态重查；Actions 第一轮已证实该导入部分通过编译，后续错误为 facade 参数兼容。
 - 已移除串流主菜单本机软键盘项、停止实例化 Game 内置全键盘、移除悬浮球旧键盘动作并加入旧设置迁移；VR 状态下过滤本机 IME 快捷动作并增加自动弹出队列二次检查。仍需自审所有调用者和测试结果。
 - 焦点、toast 包装、VR 窗口 IME 标志和面板设计仍需逐项自审；绘图 AndroidTest 只会在 Actions 编译/设备执行，像素断言稳定性待核实。
 - 历史 CI 46113439950 通过的是旧提交 6bd5c70，不覆盖当前 dirty diff；109 项 VR JVM、lint 和两份 APK 是历史结果。
@@ -21,8 +21,8 @@
 
 ## 下一步（按固定闭环连续执行）
 
-1. 收尾键盘、Toast、焦点和绘图测试的语义检查，补必要的回归用例，并自审所有未提交差异。
-2. 提交推送目标分支并跑一轮匹配 SHA 的 Actions 回归测试；失败则修复并重跑。
+1. 自审当前编译修正及全量已提交改动，确认没有引入语法问题。
+2. 提交推送修复并跑新 SHA 的 Actions 回归测试；失败则继续按错误日志修复并重跑。
 3. 回归通过后启动全项目独立子代理审查；确认问题修复后重复相关测试与审查。
 4. 最终全量 Actions 通过后创建目标 fork 预发布 Release，下载并校验 APK。
 5. 按 AGENTS.md 范围删除目标分支的旧 vr-build runs 与旧 VR review APK，保留新 run/Release/APK。

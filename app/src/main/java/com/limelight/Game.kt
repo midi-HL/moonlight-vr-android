@@ -123,6 +123,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.ImageButton
 import com.limelight.utils.VrToast as Toast
 import com.limelight.vr.VrLocalImePolicy
+import com.limelight.vr.VrSession
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat

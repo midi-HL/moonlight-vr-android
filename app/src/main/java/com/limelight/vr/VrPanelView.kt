@@ -79,14 +79,14 @@ class VrPanelView(context: Context) : View(context) {
                     round(canvas, 594f, y + 21f, 715f, y + 28f, 3.5f, track)
                     if (fraction > 0f) round(canvas, 594f, y + 21f, 594f + fraction * 121f, y + 28f, 3.5f, accent)
                     round(canvas, 731f, y + 7f, 834f, y + 42f, 10f, if (isEditing) accent else chip)
-                    right(canvas, row.format(current), 823f, y + 32f, 20f, if (isEditing) surface else primaryText, true)
+                    right(canvas, row.format(current), 823f, y + 32f, 20f, if (isEditing) surfaceMid else primaryText, true)
                 }
                 VrQuickPanel.Kind.TOGGLE -> {
                     val on = current >= 0.5f
                     val state = context.getString(if (on) R.string.vr_panel_on else R.string.vr_panel_off)
                     right(canvas, state, 761f, y + 32f, 19f, secondary)
                     round(canvas, 773f, y + 12f, 832f, y + 38f, 13f, if (on) accent else track)
-                    shape.color = if (on) surface else secondary
+                    shape.color = if (on) surfaceMid else secondary
                     canvas.drawCircle(if (on) 818f else 787f, y + 25f, 9f, shape)
                 }
                 VrQuickPanel.Kind.ACTION -> {

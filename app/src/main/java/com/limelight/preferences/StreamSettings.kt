@@ -719,13 +719,16 @@ class StreamSettings : ThemedAppCompatActivity() {
      * 聚焦到选中的分类项
      */
     private fun focusSelectedCategory() {
-        if (categoryList != null && categoryAdapter != null && (categoryAdapter?.itemCount ?: 0) > 0) {
-            categoryList?.post {
-                val vh = categoryList?.findViewHolderForAdapterPosition(selectedCategoryIndex)
-                // The ViewHolder root is a non-focusable FrameLayout. Focus its
-                // category row so controller navigation can enter the sidebar.
-                vh?.itemView?.findViewById<View>(R.id.category_item_root)?.requestFocus()
-            }
+        val list = categoryList ?: return
+        val adapter = categoryAdapter ?: return
+        if (adapter.itemCount == 0) return
+        val target = selectedCategoryIndex.coerceIn(0, adapter.itemCount - 1)
+        list.scrollToPosition(target)
+        list.post {
+            val vh = list.findViewHolderForAdapterPosition(target)
+            // The ViewHolder root is a non-focusable FrameLayout. Focus its
+            // category row so controller navigation can enter the sidebar.
+            vh?.itemView?.findViewById<View>(R.id.category_item_root)?.requestFocus()
         }
     }
 
